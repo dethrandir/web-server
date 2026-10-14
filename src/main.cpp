@@ -1,12 +1,17 @@
 #include "config/config.hpp"
 #include "log/log.hpp"
+#include "server/server.hpp"
 
 #include <cxxopts.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <csignal>
 #include <filesystem>
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace web_server {
@@ -15,6 +20,12 @@ namespace {
 
 constexpr std::string_view kProgramName = "web-server";
 constexpr std::string_view kVersion = WEB_SERVER_VERSION;
+
+std::atomic<bool> g_stop_requested{false};
+
+extern "C" void handle_signal(int) {
+  g_stop_requested.store(true);
+}
 
 int run_validate(const std::filesystem::path& path) {
   try {
@@ -94,7 +105,20 @@ int run(int argc, char** argv) {
       log::warn("no configuration file provided (use --config PATH)");
     }
 
-    log::info("{} {} starting", kProgramName, kVersion);
+    std::signal(SIGINT, handle_signal);
+    std::signal(SIGTERM, handle_signal);
+
+    server::Server server{config};
+    server.start();
+    log::info("{} {} started (press Ctrl+C to stop)", kProgramName, kVersion);
+
+    while (!g_stop_requested.load()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{200});
+    }
+
+    log::info("shutting down");
+    server.stop();
+    log::info("stopped");
     return 0;
   } catch (const cxxopts::exceptions::exception& e) {
     log::error("invalid arguments: {}", e.what());
