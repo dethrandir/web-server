@@ -25,6 +25,15 @@ constexpr std::string_view kExampleConfig = R"(# web-server configuration file
 [server]
 host = "0.0.0.0"
 port = 8080
+# Worker threads (0 = one per CPU core).
+threads = 0
+# Seconds an idle keep-alive connection stays open.
+keep_alive_timeout = 5
+# Seconds allowed to receive a complete request.
+read_timeout = 15
+# Request header/body size limits, in bytes.
+max_header_bytes = 16384
+max_body_bytes = 1048576
 
 [routes]
 # Map a request path to a file or directory to serve.
@@ -94,11 +103,19 @@ std::size_t read_size(const toml::table& table, std::string_view key, std::size_
   }
   if (const auto* as_integer = value->as_integer()) {
     if (as_integer->get() < 0) {
-      throw std::runtime_error("cache." + std::string{key} + " must not be negative");
+      throw std::runtime_error(std::string{key} + " must not be negative");
     }
     return static_cast<std::size_t>(as_integer->get());
   }
-  throw std::runtime_error("cache." + std::string{key} + " must be a number or size string");
+  throw std::runtime_error(std::string{key} + " must be a number or size string");
+}
+
+std::uint32_t read_uint(const toml::table& table, std::string_view key, std::uint32_t fallback) {
+  const std::int64_t value = table[key].value_or(static_cast<std::int64_t>(fallback));
+  if (value < 0) {
+    throw std::runtime_error(std::string{key} + " must not be negative");
+  }
+  return static_cast<std::uint32_t>(value);
 }
 
 }  // namespace
@@ -120,6 +137,13 @@ Config load(const std::filesystem::path& path) {
       throw std::runtime_error("server.port must be in range 1-65535");
     }
     config.port = static_cast<std::uint16_t>(port);
+
+    config.threads = read_uint(*server, "threads", config.threads);
+    config.keep_alive_timeout_seconds =
+      read_uint(*server, "keep_alive_timeout", config.keep_alive_timeout_seconds);
+    config.read_timeout_seconds = read_uint(*server, "read_timeout", config.read_timeout_seconds);
+    config.max_header_bytes = read_size(*server, "max_header_bytes", config.max_header_bytes);
+    config.max_body_bytes = read_size(*server, "max_body_bytes", config.max_body_bytes);
   }
 
   if (const auto* routes = tbl["routes"].as_table()) {

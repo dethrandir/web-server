@@ -85,10 +85,11 @@ int run(int argc, char** argv) {
               result.count("verbose") > 0 ? log::Level::Debug : log::Level::Info);
 
     if (has_config) {
-      log::info("loaded configuration: host={} port={} routes={} cache_ttl={}s cache_max={}B "
-                "log_path={}",
-                config.host, config.port, config.routes.size(), config.cache_ttl_seconds,
-                config.cache_max_bytes, to_console ? "(console)" : config.log_path);
+      log::info("loaded configuration: host={} port={} threads={} routes={} cache_ttl={}s "
+                "cache_max={}B log_path={}",
+                config.host, config.port, config.threads, config.routes.size(),
+                config.cache_ttl_seconds, config.cache_max_bytes,
+                to_console ? "(console)" : config.log_path);
     } else {
       log::warn("no configuration file provided (use --config PATH)");
     }

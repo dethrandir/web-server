@@ -20,6 +20,16 @@ struct Route {
 struct Config {
   std::string host = "0.0.0.0";
   std::uint16_t port = 8080;
+  // Number of worker threads. 0 means "use the hardware concurrency".
+  std::uint32_t threads = 0;
+  // Seconds an idle keep-alive connection is kept open before being closed.
+  std::uint32_t keep_alive_timeout_seconds = 5;
+  // Seconds allowed to receive a complete request before the connection is dropped.
+  std::uint32_t read_timeout_seconds = 15;
+  // Maximum size of the request header block, in bytes.
+  std::size_t max_header_bytes = 16384;
+  // Maximum size of the request body, in bytes.
+  std::size_t max_body_bytes = 1024ull * 1024;
   std::string log_path;
   std::vector<Route> routes;
   // How long a cached response stays valid, in seconds. 0 disables caching.

@@ -53,9 +53,28 @@ TEST_CASE("config: falls back to defaults for missing settings", "[config]") {
   REQUIRE(cfg.port == 8080);
   REQUIRE(cfg.log_path.empty());
   REQUIRE(cfg.routes.empty());
+  REQUIRE(cfg.threads == 0);
+  REQUIRE(cfg.keep_alive_timeout_seconds == 5);
+  REQUIRE(cfg.read_timeout_seconds == 15);
+  REQUIRE(cfg.max_header_bytes == 16384);
+  REQUIRE(cfg.max_body_bytes == 1024ull * 1024);
   REQUIRE(cfg.cache_ttl_seconds == 0);
   REQUIRE(cfg.cache_max_bytes == 1024ull * 1024 * 1024);
   REQUIRE(cfg.cache_max_file_bytes == 64ull * 1024 * 1024);
+}
+
+TEST_CASE("config: loads server limits and timeouts", "[config]") {
+  const TempFile file{write_fixture("web_server_cfg_server.toml",
+                                    "[server]\nthreads = 8\nkeep_alive_timeout = 30\n"
+                                    "read_timeout = 2\nmax_header_bytes = \"8K\"\n"
+                                    "max_body_bytes = \"2M\"\n")};
+
+  const config::Config cfg = config::load(file.path);
+  REQUIRE(cfg.threads == 8);
+  REQUIRE(cfg.keep_alive_timeout_seconds == 30);
+  REQUIRE(cfg.read_timeout_seconds == 2);
+  REQUIRE(cfg.max_header_bytes == 8192);
+  REQUIRE(cfg.max_body_bytes == 2ull * 1024 * 1024);
 }
 
 TEST_CASE("config: parses cache memory limits", "[config]") {
@@ -145,6 +164,8 @@ TEST_CASE("config: write_example produces a loadable config", "[config]") {
 
   const config::Config cfg = config::load(file.path);
   REQUIRE(cfg.port == 8080);
+  REQUIRE(cfg.threads == 0);
+  REQUIRE(cfg.max_header_bytes == 16384);
   REQUIRE(cfg.cache_ttl_seconds == 60);
   REQUIRE(cfg.cache_max_bytes == 1024ull * 1024 * 1024);
   REQUIRE(cfg.cache_max_file_bytes == 64ull * 1024 * 1024);
