@@ -2,3 +2,4 @@
 
 [ ] work on config system
 [ ] istatistik modulu ekle (mesela cache hit / miss orani olcme gibi)
+[ ] dizin izleme recursive yapilmali
