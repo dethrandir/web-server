@@ -1,42 +1,106 @@
 #include "file.hpp"
 
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 
 namespace web_server::io {
 
-// TODO: implement
-bool exists(const std::filesystem::path&) {
-  throw std::logic_error("web_server::io::exists is not implemented yet");
+namespace {
+
+std::ios::openmode write_mode(bool truncate) {
+  return std::ios::binary | (truncate ? std::ios::trunc : std::ios::app);
 }
 
-// TODO: implement
-std::string read_text(const std::filesystem::path&) {
-  throw std::logic_error("web_server::io::read_text is not implemented yet");
+}  // namespace
+
+bool exists(const std::filesystem::path& path) {
+  return std::filesystem::exists(path);
 }
 
-// TODO: implement
-std::vector<std::byte> read_bytes(const std::filesystem::path&) {
-  throw std::logic_error("web_server::io::read_bytes is not implemented yet");
+std::string read_text(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    throw std::runtime_error("failed to open file for reading: " + path.string());
+  }
+
+  std::string content{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+  if (in.bad()) {
+    throw std::runtime_error("failed to read file: " + path.string());
+  }
+  return content;
 }
 
-// TODO: implement
-std::vector<std::string> read_lines(const std::filesystem::path&) {
-  throw std::logic_error("web_server::io::read_lines is not implemented yet");
+std::vector<std::byte> read_bytes(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    throw std::runtime_error("failed to open file for reading: " + path.string());
+  }
+
+  in.seekg(0, std::ios::end);
+  const std::streamoff size = in.tellg();
+  if (size < 0) {
+    throw std::runtime_error("failed to determine size of file: " + path.string());
+  }
+  in.seekg(0, std::ios::beg);
+
+  std::vector<std::byte> data(static_cast<std::size_t>(size));
+  if (size > 0) {
+    in.read(reinterpret_cast<char*>(data.data()), size);
+    if (!in) {
+      throw std::runtime_error("failed to read file: " + path.string());
+    }
+  }
+  return data;
 }
 
-// TODO: implement
-void write_text(const std::filesystem::path&, std::string_view, bool) {
-  throw std::logic_error("web_server::io::write_text is not implemented yet");
+std::vector<std::string> read_lines(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    throw std::runtime_error("failed to open file for reading: " + path.string());
+  }
+
+  std::vector<std::string> lines;
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    lines.push_back(std::move(line));
+  }
+  if (in.bad()) {
+    throw std::runtime_error("failed to read file: " + path.string());
+  }
+  return lines;
 }
 
-// TODO: implement
-void append_text(const std::filesystem::path&, std::string_view) {
-  throw std::logic_error("web_server::io::append_text is not implemented yet");
+void write_text(const std::filesystem::path& path, std::string_view content, bool truncate) {
+  std::ofstream out(path, write_mode(truncate));
+  if (!out) {
+    throw std::runtime_error("failed to open file for writing: " + path.string());
+  }
+
+  out.write(content.data(), static_cast<std::streamsize>(content.size()));
+  if (!out) {
+    throw std::runtime_error("failed to write file: " + path.string());
+  }
 }
 
-// TODO: implement
-void write_bytes(const std::filesystem::path&, std::span<const std::byte>, bool) {
-  throw std::logic_error("web_server::io::write_bytes is not implemented yet");
+void append_text(const std::filesystem::path& path, std::string_view content) {
+  write_text(path, content, false);
+}
+
+void write_bytes(const std::filesystem::path& path, std::span<const std::byte> data,
+                 bool truncate) {
+  std::ofstream out(path, write_mode(truncate));
+  if (!out) {
+    throw std::runtime_error("failed to open file for writing: " + path.string());
+  }
+
+  out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+  if (!out) {
+    throw std::runtime_error("failed to write file: " + path.string());
+  }
 }
 
 }  // namespace web_server::io
