@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -45,5 +46,13 @@ std::size_t receive(Socket& socket, std::span<std::byte> buffer);
 
 // Enables or disables SO_REUSEADDR on the socket.
 void set_reuse_address(Socket& socket, bool enabled);
+
+// Sets the receive/send timeout (SO_RCVTIMEO/SO_SNDTIMEO). Zero clears it.
+void set_receive_timeout(Socket& socket, std::chrono::seconds timeout);
+
+void set_send_timeout(Socket& socket, std::chrono::seconds timeout);
+
+// Returns the local port the socket is bound to.
+[[nodiscard]] std::uint16_t local_port(const Socket& socket);
 
 }  // namespace web_server::net

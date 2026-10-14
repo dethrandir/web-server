@@ -1,6 +1,7 @@
 #include "net/socket.hpp"
 
 #include <catch_amalgamated.hpp>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -11,20 +12,12 @@
 
 namespace net = web_server::net;
 
-namespace {
-
-constexpr std::uint16_t kTestPort = 45678;
-
-}  // namespace
-
 TEST_CASE("net: loopback send/receive round trip", "[net]") {
-  net::Socket server;
-  try {
-    server = net::listen_tcp("127.0.0.1", kTestPort);
-  } catch (const std::exception& e) {
-    SKIP("test port unavailable: " << e.what());
-  }
+  net::Socket server = net::listen_tcp("127.0.0.1", 0);
   REQUIRE(server.valid());
+
+  const std::uint16_t port = net::local_port(server);
+  REQUIRE(port != 0);
 
   std::string received;
   std::thread worker([&] {
@@ -36,7 +29,7 @@ TEST_CASE("net: loopback send/receive round trip", "[net]") {
     net::send(client, std::as_bytes(std::span{reply}));
   });
 
-  net::Socket conn = net::connect_tcp("127.0.0.1", kTestPort);
+  net::Socket conn = net::connect_tcp("127.0.0.1", port);
   const std::string message = "ping";
   net::send(conn, std::as_bytes(std::span{message}));
 
@@ -50,7 +43,7 @@ TEST_CASE("net: loopback send/receive round trip", "[net]") {
 }
 
 TEST_CASE("net: socket close and move semantics", "[net]") {
-  net::Socket server = net::listen_tcp("127.0.0.1", kTestPort + 1);
+  net::Socket server = net::listen_tcp("127.0.0.1", 0);
   REQUIRE(server.valid());
   const int handle = server.handle();
 
@@ -61,6 +54,12 @@ TEST_CASE("net: socket close and move semantics", "[net]") {
 
   moved.close();
   REQUIRE_FALSE(moved.valid());
+}
+
+TEST_CASE("net: sets socket timeouts", "[net]") {
+  net::Socket server = net::listen_tcp("127.0.0.1", 0);
+  REQUIRE_NOTHROW(net::set_receive_timeout(server, std::chrono::seconds{1}));
+  REQUIRE_NOTHROW(net::set_send_timeout(server, std::chrono::seconds{1}));
 }
 
 TEST_CASE("net: connecting to a refused port throws", "[net]") {

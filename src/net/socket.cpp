@@ -1,11 +1,14 @@
 #include "socket.hpp"
 
 #include <cerrno>
+#include <chrono>
 #include <memory>
 #include <netdb.h>
+#include <netinet/in.h>
 #include <stdexcept>
 #include <string>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <system_error>
 #include <unistd.h>
@@ -42,6 +45,15 @@ AddrInfoPtr resolve(std::string_view host, std::uint16_t port, bool passive) {
 
 std::string endpoint(std::string_view host, std::uint16_t port) {
   return std::string{host} + ":" + std::to_string(port);
+}
+
+void set_timeout(int handle, int option, std::chrono::seconds timeout) {
+  timeval value{};
+  value.tv_sec = static_cast<time_t>(timeout.count());
+  value.tv_usec = 0;
+  if (::setsockopt(handle, SOL_SOCKET, option, &value, sizeof(value)) != 0) {
+    throw std::system_error(errno, std::generic_category(), "setsockopt(timeout)");
+  }
 }
 
 }  // namespace
@@ -137,7 +149,7 @@ Socket accept(const Socket& server) {
 std::size_t send(Socket& socket, std::span<const std::byte> data) {
   std::ptrdiff_t written = -1;
   do {
-    written = ::send(socket.handle(), data.data(), data.size(), 0);
+    written = ::send(socket.handle(), data.data(), data.size(), MSG_NOSIGNAL);
   } while (written < 0 && errno == EINTR);
 
   if (written < 0) {
@@ -163,6 +175,32 @@ void set_reuse_address(Socket& socket, bool enabled) {
   if (::setsockopt(socket.handle(), SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value)) != 0) {
     throw std::system_error(errno, std::generic_category(), "setsockopt(SO_REUSEADDR)");
   }
+}
+
+void set_receive_timeout(Socket& socket, std::chrono::seconds timeout) {
+  set_timeout(socket.handle(), SO_RCVTIMEO, timeout);
+}
+
+void set_send_timeout(Socket& socket, std::chrono::seconds timeout) {
+  set_timeout(socket.handle(), SO_SNDTIMEO, timeout);
+}
+
+std::uint16_t local_port(const Socket& socket) {
+  sockaddr_storage address{};
+  socklen_t length = sizeof(address);
+  if (::getsockname(socket.handle(), reinterpret_cast<sockaddr*>(&address), &length) != 0) {
+    throw std::system_error(errno, std::generic_category(), "getsockname");
+  }
+
+  if (address.ss_family == AF_INET) {
+    const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(&address);
+    return ntohs(ipv4->sin_port);
+  }
+  if (address.ss_family == AF_INET6) {
+    const auto* ipv6 = reinterpret_cast<const sockaddr_in6*>(&address);
+    return ntohs(ipv6->sin6_port);
+  }
+  throw std::runtime_error("unsupported address family for local_port");
 }
 
 }  // namespace web_server::net
