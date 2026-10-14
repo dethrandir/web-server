@@ -66,6 +66,18 @@ TEST_CASE("config: falls back to defaults for missing settings", "[config]") {
   REQUIRE(cfg.stats_interval_seconds == 5);
 }
 
+TEST_CASE("config: loads docs settings", "[config]") {
+  const TempFile file{write_fixture(
+    "web_server_cfg_docs.toml", "[docs]\nenabled = true\npath = \"/api\"\npage = \"/api.html\"\n"
+                                "page_file = \"static/api.html\"\n")};
+
+  const config::Config cfg = config::load(file.path);
+  REQUIRE(cfg.docs_enabled);
+  REQUIRE(cfg.docs_path == "/api");
+  REQUIRE(cfg.docs_page == "/api.html");
+  REQUIRE(cfg.docs_page_file == "static/api.html");
+}
+
 TEST_CASE("config: loads watch settings", "[config]") {
   const TempFile file{write_fixture("web_server_cfg_watch.toml",
                                     "[watch]\nenabled = true\nconfig_reload = true\n"

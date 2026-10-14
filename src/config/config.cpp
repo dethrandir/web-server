@@ -58,6 +58,13 @@ page_file = "static/statistics.html"
 file = ""
 interval = 5
 
+[docs]
+# Built-in route documentation endpoint and dashboard (off by default).
+enabled = false
+path = "/docs"
+page = "/docs.html"
+page_file = "static/docs.html"
+
 [watch]
 # Watch files with inotify (off by default).
 enabled = false
@@ -191,6 +198,13 @@ Config load(const std::filesystem::path& path) {
     config.stats_page_file = (*stats)["page_file"].value_or(config.stats_page_file);
     config.stats_file = (*stats)["file"].value_or(config.stats_file);
     config.stats_interval_seconds = read_uint(*stats, "interval", config.stats_interval_seconds);
+  }
+
+  if (const auto* docs = tbl["docs"].as_table()) {
+    config.docs_enabled = (*docs)["enabled"].value_or(config.docs_enabled);
+    config.docs_path = (*docs)["path"].value_or(config.docs_path);
+    config.docs_page = (*docs)["page"].value_or(config.docs_page);
+    config.docs_page_file = (*docs)["page_file"].value_or(config.docs_page_file);
   }
 
   if (const auto* watch = tbl["watch"].as_table()) {

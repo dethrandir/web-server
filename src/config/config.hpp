@@ -47,6 +47,12 @@ struct Config {
   std::string stats_file;                                  // optional JSON Lines output
   std::uint32_t stats_interval_seconds = 5;                // sampling interval
 
+  // Built-in route documentation endpoint/dashboard (off by default).
+  bool docs_enabled = false;
+  std::string docs_path = "/docs";                  // JSON endpoint
+  std::string docs_page = "/docs.html";             // dashboard page
+  std::string docs_page_file = "static/docs.html";  // page file on disk
+
   // Live watching of files (inotify).
   bool watch_enabled = false;
   bool watch_config_reload = false;    // reload config on change
