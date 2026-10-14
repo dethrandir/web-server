@@ -20,6 +20,13 @@ ttl = 60
 max_size = "64M"
 max_file_size = "8M"
 
+[docs]
+# Built-in route documentation: http://127.0.0.1:6868/docs.html
+enabled = true
+path = "/docs"
+page = "/docs.html"
+page_file = "static/docs.html"
+
 [watch]
 enabled = true
 config_reload = true

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <ctime>
 #include <filesystem>
+#include <nlohmann/json.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -115,6 +116,36 @@ std::string_view content_type_for(const std::filesystem::path& path) {
   if (extension == ".woff2")
     return "font/woff2";
   return "application/octet-stream";
+}
+
+std::string docs_json(const config::Config& cfg, double uptime_seconds) {
+  std::error_code ec;
+  nlohmann::json routes = nlohmann::json::array();
+  for (const config::Route& route : cfg.routes) {
+    routes.push_back({
+      {"path", route.path},
+      {"target", route.target},
+      {"type", std::filesystem::is_directory(route.target, ec) ? "directory" : "file"},
+    });
+  }
+
+  nlohmann::json endpoints = nlohmann::json::array();
+  endpoints.push_back(cfg.docs_path);
+  if (!cfg.docs_page.empty()) {
+    endpoints.push_back(cfg.docs_page);
+  }
+  if (cfg.stats_enabled) {
+    endpoints.push_back(cfg.stats_path);
+    endpoints.push_back(cfg.stats_page);
+  }
+
+  nlohmann::json json;
+  json["program"] = "web-server";
+  json["version"] = WEB_SERVER_VERSION;
+  json["uptime_seconds"] = uptime_seconds;
+  json["routes"] = std::move(routes);
+  json["endpoints"] = std::move(endpoints);
+  return json.dump(2);
 }
 
 std::string error_body(int status) {
@@ -293,6 +324,7 @@ void Server::start() {
   // Wake accept() periodically so stop() can interrupt it without closing the
   // socket from another thread (closing does not reliably wake a blocked accept).
   net::set_receive_timeout(listener_, std::chrono::seconds{1});
+  started_at_ = std::chrono::steady_clock::now();
   running_.store(true);
 
   std::size_t worker_count = cfg->threads;
@@ -387,6 +419,10 @@ void Server::reload(const config::Config& updated) {
   applied.stats_page_file = current->stats_page_file;
   applied.stats_file = current->stats_file;
   applied.stats_interval_seconds = current->stats_interval_seconds;
+  applied.docs_enabled = current->docs_enabled;
+  applied.docs_path = current->docs_path;
+  applied.docs_page = current->docs_page;
+  applied.docs_page_file = current->docs_page_file;
   applied.watch_enabled = current->watch_enabled;
   applied.watch_config_reload = current->watch_config_reload;
   applied.watch_invalidate_cache = current->watch_invalidate_cache;
@@ -555,6 +591,22 @@ int Server::respond(net::Socket& connection, const config::Config& cfg,
   }
 
   const std::string request_path = percent_decode(strip_query(request.target));
+
+  if (cfg.docs_enabled) {
+    if (request_path == cfg.docs_path) {
+      const double uptime =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - started_at_).count();
+      return send_status(200, "application/json", docs_json(cfg, uptime));
+    }
+    if (request_path == cfg.docs_page) {
+      try {
+        const std::string html = io::read_text(cfg.docs_page_file);
+        return send_status(200, "text/html; charset=utf-8", html);
+      } catch (const std::exception&) {
+        return send_status(500, "text/html; charset=utf-8", error_body(500));
+      }
+    }
+  }
 
   if (cfg.stats_enabled) {
     if (request_path == cfg.stats_path) {

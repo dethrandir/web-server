@@ -186,6 +186,36 @@ TEST_CASE("server: invalidates the cache when a file changes", "[server]") {
   instance.stop();
 }
 
+TEST_CASE("server: exposes the docs endpoint and page", "[server]") {
+  const Fixture fixture;
+  const std::filesystem::path page = fixture.dir / "docs.html";
+  {
+    std::ofstream out(page, std::ios::binary);
+    out << "<html>docs page</html>";
+  }
+
+  config::Config cfg = make_config(fixture.dir);
+  cfg.docs_enabled = true;
+  cfg.docs_page_file = page.string();
+
+  server::Server instance{cfg};
+  instance.start();
+
+  const std::string json =
+    round_trip(instance.port(), "GET /docs HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+  REQUIRE(json.starts_with("HTTP/1.1 200"));
+  REQUIRE(json.find("application/json") != std::string::npos);
+  REQUIRE(json.find("\"routes\"") != std::string::npos);
+  REQUIRE(json.find("\"/hello\"") != std::string::npos);
+
+  const std::string html =
+    round_trip(instance.port(), "GET /docs.html HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+  REQUIRE(html.starts_with("HTTP/1.1 200"));
+  REQUIRE(html.find("docs page") != std::string::npos);
+
+  instance.stop();
+}
+
 TEST_CASE("server: exposes the statistics endpoint and page", "[server]") {
   const Fixture fixture;
   const std::filesystem::path page = fixture.dir / "stats.html";

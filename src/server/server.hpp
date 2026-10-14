@@ -9,6 +9,7 @@
 #include "watch/watcher.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -71,6 +72,7 @@ private:
   net::Socket listener_;
   std::atomic<bool> running_{false};
   std::uint16_t port_ = 0;
+  std::chrono::steady_clock::time_point started_at_{};
 
   std::thread acceptor_;
   std::vector<std::thread> workers_;

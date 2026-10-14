@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web-server — docs</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f172a;
+        --card: #1e293b;
+        --muted: #94a3b8;
+        --text: #e2e8f0;
+        --accent: #38bdf8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 2rem;
+        background: var(--bg);
+        color: var(--text);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.5rem;
+      }
+      .badge {
+        background: var(--card);
+        color: var(--muted);
+        border-radius: 999px;
+        padding: 0.15rem 0.7rem;
+        font-size: 0.8rem;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .card {
+        background: var(--card);
+        border-radius: 0.75rem;
+        padding: 1rem 1.25rem;
+        overflow: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+      }
+      th {
+        color: var(--muted);
+        font-size: 0.75rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      code {
+        background: rgba(148, 163, 184, 0.15);
+        padding: 0.1rem 0.35rem;
+        border-radius: 0.25rem;
+      }
+      .endpoints {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.25rem;
+      }
+      .endpoints a {
+        background: rgba(56, 189, 248, 0.12);
+        border-radius: 0.5rem;
+        padding: 0.3rem 0.6rem;
+      }
+      h2 {
+        font-size: 0.8rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 1.5rem 0 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>web-server · docs</h1>
+      <span class="badge" id="meta">yükleniyor…</span>
+      <span class="badge"><a href="/statistics.html">statistics &rarr;</a></span>
+    </header>
+
+    <h2>Routes</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Request path</th>
+            <th>Serves</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody id="routes"></tbody>
+      </table>
+    </div>
+
+    <h2>Endpoints</h2>
+    <div class="card">
+      <div class="endpoints" id="endpoints"></div>
+    </div>
+
+    <script>
+      const endpoint = new URLSearchParams(location.search).get("endpoint") || "/docs";
+
+      async function refresh() {
+        try {
+          const data = await (await fetch(endpoint, { headers: { Accept: "application/json" } })).json();
+
+          document.getElementById("meta").textContent =
+            `${data.program} v${data.version} · uptime ${Math.floor(data.uptime_seconds)}s`;
+
+          const rows = data.routes
+            .map(
+              (route) =>
+                `<tr><td><code>${route.path}</code></td><td><code>${route.target}</code></td><td>${route.type}</td></tr>`,
+            )
+            .join("");
+          document.getElementById("routes").innerHTML =
+            rows || '<tr><td colspan="3">rota yok</td></tr>';
+
+          document.getElementById("endpoints").innerHTML = data.endpoints
+            .map((path) => `<a href="${path}">${path}</a>`)
+            .join("");
+        } catch (error) {
+          document.getElementById("meta").textContent = "bağlantı hatası";
+        }
+      }
+
+      refresh();
+      setInterval(refresh, 3000);
+    </script>
+  </body>
+</html>
