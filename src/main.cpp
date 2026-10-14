@@ -1,12 +1,10 @@
 #include "config/config.hpp"
+#include "log/log.hpp"
 
 #include <cxxopts.hpp>
-#include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/spdlog.h>
 
 #include <filesystem>
 #include <iostream>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -17,20 +15,6 @@ namespace {
 
 constexpr std::string_view kProgramName = "web-server";
 constexpr std::string_view kVersion = WEB_SERVER_VERSION;
-
-void setup_logging(const config::Config& config, spdlog::level::level_enum level) {
-  if (!config.log_path.empty() && config.log_path != "-") {
-    const std::filesystem::path path = config.log_path;
-    if (path.has_parent_path()) {
-      std::filesystem::create_directories(path.parent_path());
-    }
-    spdlog::set_default_logger(spdlog::basic_logger_mt("file", path.string()));
-  }
-
-  spdlog::set_level(level);
-  spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v");
-  spdlog::flush_on(spdlog::level::info);
-}
 
 int run_validate(const std::filesystem::path& path) {
   try {
@@ -96,23 +80,25 @@ int run(int argc, char** argv) {
     const config::Config config =
       has_config ? config::load(result["config"].as<std::string>()) : config::Config{};
 
-    setup_logging(config, result.count("verbose") > 0 ? spdlog::level::debug : spdlog::level::info);
+    const bool to_console = config.log_path.empty() || config.log_path == "-";
+    log::init(to_console ? std::filesystem::path{} : std::filesystem::path{config.log_path},
+              result.count("verbose") > 0 ? log::Level::Debug : log::Level::Info);
 
     if (has_config) {
-      spdlog::info("loaded configuration: host={} port={} log_path={}", config.host, config.port,
-                   config.log_path.empty() ? "(console)" : config.log_path);
+      log::info("loaded configuration: host={} port={} log_path={}", config.host, config.port,
+                to_console ? "(console)" : config.log_path);
     } else {
-      spdlog::warn("no configuration file provided (use --config PATH)");
+      log::warn("no configuration file provided (use --config PATH)");
     }
 
-    spdlog::info("{} {} starting", kProgramName, kVersion);
+    log::info("{} {} starting", kProgramName, kVersion);
     return 0;
   } catch (const cxxopts::exceptions::exception& e) {
-    spdlog::error("invalid arguments: {}", e.what());
+    log::error("invalid arguments: {}", e.what());
     std::cerr << options.help() << '\n';
     return 1;
   } catch (const std::exception& e) {
-    spdlog::error("{}", e.what());
+    log::error("{}", e.what());
     return 1;
   }
 }
