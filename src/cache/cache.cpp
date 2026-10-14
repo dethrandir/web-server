@@ -25,14 +25,17 @@ std::shared_ptr<const CacheEntry> Cache::get(const std::filesystem::path& path) 
   std::lock_guard lock{mutex_};
   const auto it = entries_.find(path);
   if (it == entries_.end()) {
+    misses_.fetch_add(1, std::memory_order_relaxed);
     return nullptr;
   }
   if (expired(*it->second, ttl_)) {
     bytes_ -= it->second->data.size();
     entries_.erase(it);
+    misses_.fetch_add(1, std::memory_order_relaxed);
     return nullptr;
   }
   it->second->last_used = now();
+  hits_.fetch_add(1, std::memory_order_relaxed);
   return it->second;
 }
 
@@ -97,6 +100,17 @@ std::size_t Cache::max_bytes() const noexcept {
   return max_bytes_;
 }
 
+CacheStats Cache::stats() const {
+  std::lock_guard lock{mutex_};
+  CacheStats stats;
+  stats.entries = entries_.size();
+  stats.bytes = bytes_;
+  stats.hits = hits_.load(std::memory_order_relaxed);
+  stats.misses = misses_.load(std::memory_order_relaxed);
+  stats.evictions = evictions_.load(std::memory_order_relaxed);
+  return stats;
+}
+
 void Cache::evict_expired_locked() {
   for (auto it = entries_.begin(); it != entries_.end();) {
     if (expired(*it->second, ttl_)) {
@@ -118,6 +132,7 @@ void Cache::evict_until_fits_locked(std::size_t incoming) {
     }
     bytes_ -= victim->second->data.size();
     entries_.erase(victim);
+    evictions_.fetch_add(1, std::memory_order_relaxed);
   }
 }
 

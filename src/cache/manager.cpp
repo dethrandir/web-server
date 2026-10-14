@@ -29,6 +29,10 @@ std::shared_ptr<const CacheEntry> CacheManager::get(const std::filesystem::path&
   return entry;
 }
 
+CacheStats CacheManager::stats() const {
+  return cache_.stats();
+}
+
 std::shared_ptr<CacheEntry> CacheManager::load(const std::filesystem::path& file) const {
   std::error_code ec;
   if (!std::filesystem::is_regular_file(file, ec)) {

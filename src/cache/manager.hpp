@@ -20,6 +20,8 @@ public:
   // and every call reads from disk.
   [[nodiscard]] std::shared_ptr<const CacheEntry> get(const std::filesystem::path& file);
 
+  [[nodiscard]] CacheStats stats() const;
+
 private:
   [[nodiscard]] std::shared_ptr<CacheEntry> load(const std::filesystem::path& file) const;
 

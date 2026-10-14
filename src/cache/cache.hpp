@@ -1,7 +1,9 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -9,6 +11,15 @@
 #include <vector>
 
 namespace web_server::cache {
+
+// A point-in-time view of the cache's activity and occupancy.
+struct CacheStats {
+  std::uint64_t entries = 0;
+  std::uint64_t bytes = 0;
+  std::uint64_t hits = 0;
+  std::uint64_t misses = 0;
+  std::uint64_t evictions = 0;
+};
 
 // A single file held in memory, plus the metadata needed to serve it.
 struct CacheEntry {
@@ -45,6 +56,9 @@ public:
   [[nodiscard]] std::size_t bytes() const;
   [[nodiscard]] std::size_t max_bytes() const noexcept;
 
+  // Snapshot of occupancy and hit/miss/eviction counters.
+  [[nodiscard]] CacheStats stats() const;
+
 private:
   void evict_expired_locked();
   void evict_until_fits_locked(std::size_t incoming_bytes);
@@ -54,6 +68,10 @@ private:
   std::size_t max_bytes_;
   std::chrono::seconds ttl_;
   std::size_t bytes_ = 0;
+
+  std::atomic<std::uint64_t> hits_{0};
+  std::atomic<std::uint64_t> misses_{0};
+  std::atomic<std::uint64_t> evictions_{0};
 };
 
 }  // namespace web_server::cache

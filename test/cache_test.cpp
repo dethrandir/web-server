@@ -91,6 +91,21 @@ TEST_CASE("cache: erase and clear update the byte count", "[cache]") {
   REQUIRE(instance.bytes() == 0);
 }
 
+TEST_CASE("cache: reports hit, miss and eviction counters", "[cache]") {
+  cache::Cache instance{15, std::chrono::seconds{60}};
+  instance.put(make_entry("/a", 10));
+  static_cast<void>(instance.get("/a"));        // hit
+  static_cast<void>(instance.get("/missing"));  // miss
+  instance.put(make_entry("/b", 10));           // evicts /a
+
+  const cache::CacheStats stats = instance.stats();
+  REQUIRE(stats.entries == 1);
+  REQUIRE(stats.bytes == 10);
+  REQUIRE(stats.hits == 1);
+  REQUIRE(stats.misses == 1);
+  REQUIRE(stats.evictions == 1);
+}
+
 TEST_CASE("cache: a reader keeps its entry alive past eviction", "[cache]") {
   cache::Cache instance{10, std::chrono::seconds{60}};
   const std::shared_ptr<const cache::CacheEntry> held = instance.put(make_entry("/a", 10));
