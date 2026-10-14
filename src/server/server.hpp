@@ -1,10 +1,16 @@
 #pragma once
 
 #include "config/config.hpp"
+#include "http/http.hpp"
 #include "net/socket.hpp"
 
 #include <atomic>
+#include <condition_variable>
+#include <cstdint>
+#include <deque>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 namespace web_server::server {
 
@@ -30,14 +36,28 @@ public:
 
   [[nodiscard]] bool running() const noexcept;
 
+  // The port the server is actually bound to (useful when configured with 0).
+  [[nodiscard]] std::uint16_t port() const noexcept;
+
 private:
-  void serve_forever();
+  void accept_loop();
+  void worker_loop();
+  void enqueue(net::Socket connection);
   void handle_connection(net::Socket connection);
+  bool respond(net::Socket& connection, const http::Request& request, bool keep_alive);
 
   config::Config config_;
   net::Socket listener_;
   std::atomic<bool> running_{false};
-  std::thread worker_;
+  std::uint16_t port_ = 0;
+
+  std::thread acceptor_;
+  std::vector<std::thread> workers_;
+
+  std::mutex mutex_;
+  std::condition_variable queue_cv_;
+  std::condition_variable stop_cv_;
+  std::deque<net::Socket> queue_;
 };
 
 }  // namespace web_server::server
