@@ -34,6 +34,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/cxxopts"
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/tomlplusplus"
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/spdlog"
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/catch2"
 )
 
 if(MSVC)
