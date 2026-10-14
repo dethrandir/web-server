@@ -1,4 +1,4 @@
-#include "config.hpp"
+#include "config/config.hpp"
 
 #include <cxxopts.hpp>
 #include <spdlog/sinks/basic_file_sink.h>
