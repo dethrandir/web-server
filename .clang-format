@@ -1,0 +1,34 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 100
+ContinuationIndentWidth: 2
+
+AccessModifierOffset: -2
+BreakBeforeBraces: Attach
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+NamespaceIndentation: None
+SpacesBeforeTrailingComments: 2
+IndentPPDirectives: AfterHash
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^"'
+    Priority: 1
+  - Regex: '^<(cxxopts|spdlog|toml)'
+    Priority: 2
+  - Regex: '^<'
+    Priority: 3
+SortIncludes: CaseSensitive
+...
