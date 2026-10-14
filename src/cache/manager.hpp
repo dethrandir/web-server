@@ -22,6 +22,12 @@ public:
 
   [[nodiscard]] CacheStats stats() const;
 
+  // Drops a cached file, e.g. after a watch event reports it changed.
+  bool invalidate(const std::filesystem::path& file);
+
+  // Drops every cached file under a directory.
+  std::size_t invalidate_prefix(const std::filesystem::path& directory);
+
 private:
   [[nodiscard]] std::shared_ptr<CacheEntry> load(const std::filesystem::path& file) const;
 

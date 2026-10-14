@@ -33,6 +33,14 @@ CacheStats CacheManager::stats() const {
   return cache_.stats();
 }
 
+bool CacheManager::invalidate(const std::filesystem::path& file) {
+  return cache_.invalidate(file);
+}
+
+std::size_t CacheManager::invalidate_prefix(const std::filesystem::path& directory) {
+  return cache_.invalidate_prefix(directory);
+}
+
 std::shared_ptr<CacheEntry> CacheManager::load(const std::filesystem::path& file) const {
   std::error_code ec;
   if (!std::filesystem::is_regular_file(file, ec)) {

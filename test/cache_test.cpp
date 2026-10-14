@@ -106,6 +106,23 @@ TEST_CASE("cache: reports hit, miss and eviction counters", "[cache]") {
   REQUIRE(stats.evictions == 1);
 }
 
+TEST_CASE("cache: invalidate drops an entry", "[cache]") {
+  cache::Cache instance{1024, std::chrono::seconds{60}};
+  instance.put(make_entry("/a", 10));
+  REQUIRE(instance.invalidate("/a"));
+  REQUIRE(instance.size() == 0);
+}
+
+TEST_CASE("cache: invalidate_prefix drops entries under a directory", "[cache]") {
+  cache::Cache instance{1024, std::chrono::seconds{60}};
+  instance.put(make_entry("./demo/index.html", 10));
+  instance.put(make_entry("./demo/style.css", 10));
+  instance.put(make_entry("./other.txt", 10));
+
+  REQUIRE(instance.invalidate_prefix("./demo") == 2);
+  REQUIRE(instance.size() == 1);
+}
+
 TEST_CASE("cache: a reader keeps its entry alive past eviction", "[cache]") {
   cache::Cache instance{10, std::chrono::seconds{60}};
   const std::shared_ptr<const cache::CacheEntry> held = instance.put(make_entry("/a", 10));

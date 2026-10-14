@@ -1,5 +1,6 @@
 #include "cache/cache.hpp"
 
+#include <string>
 #include <utility>
 
 namespace web_server::cache {
@@ -15,6 +16,19 @@ bool expired(const CacheEntry& entry, std::chrono::seconds ttl) {
     return true;
   }
   return now() - entry.loaded_at >= ttl;
+}
+
+bool is_under(const std::filesystem::path& path, const std::filesystem::path& directory) {
+  const std::string candidate = path.lexically_normal().string();
+  std::string prefix = directory.lexically_normal().string();
+  if (!prefix.empty() && prefix.back() == '/') {
+    prefix.pop_back();
+  }
+  if (candidate == prefix) {
+    return true;
+  }
+  return candidate.size() > prefix.size() && candidate.compare(0, prefix.size(), prefix) == 0 &&
+         candidate[prefix.size()] == '/';
 }
 
 }  // namespace
@@ -78,6 +92,25 @@ bool Cache::erase(const std::filesystem::path& path) {
   bytes_ -= it->second->data.size();
   entries_.erase(it);
   return true;
+}
+
+bool Cache::invalidate(const std::filesystem::path& path) {
+  return erase(path);
+}
+
+std::size_t Cache::invalidate_prefix(const std::filesystem::path& directory) {
+  std::lock_guard lock{mutex_};
+  std::size_t removed = 0;
+  for (auto it = entries_.begin(); it != entries_.end();) {
+    if (is_under(it->first, directory)) {
+      bytes_ -= it->second->data.size();
+      it = entries_.erase(it);
+      ++removed;
+    } else {
+      ++it;
+    }
+  }
+  return removed;
 }
 
 void Cache::clear() {

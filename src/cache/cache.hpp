@@ -50,6 +50,12 @@ public:
 
   bool erase(const std::filesystem::path& path);
 
+  // Drops a cached file (same as erase, named for the watch/invalidation path).
+  bool invalidate(const std::filesystem::path& path);
+
+  // Drops every cached entry located under `directory`. Returns how many.
+  std::size_t invalidate_prefix(const std::filesystem::path& directory);
+
   void clear();
 
   [[nodiscard]] std::size_t size() const;
