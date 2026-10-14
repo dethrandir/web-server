@@ -6,6 +6,7 @@
 #include "net/socket.hpp"
 #include "stats/reporter.hpp"
 #include "stats/stats.hpp"
+#include "watch/watcher.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -44,19 +45,28 @@ public:
   // The port the server is actually bound to (useful when configured with 0).
   [[nodiscard]] std::uint16_t port() const noexcept;
 
+  // Applies a new configuration while running. Routes, timeouts and size limits
+  // take effect immediately; host/port/threads/cache/stats changes need a restart.
+  void reload(const config::Config& config);
+
 private:
+  [[nodiscard]] std::shared_ptr<const config::Config> config() const;
+
   void accept_loop();
   void worker_loop();
   void enqueue(net::Socket connection);
   void handle_connection(net::Socket connection);
-  int respond(net::Socket& connection, const http::Request& request, bool keep_alive);
+  int respond(net::Socket& connection, const config::Config& config, const http::Request& request,
+              bool keep_alive);
   [[nodiscard]] stats::Snapshot snapshot() const;
   void count_response(int status) noexcept;
+  void setup_watchers(const config::Config& config);
 
-  config::Config config_;
+  std::atomic<std::shared_ptr<const config::Config>> config_;
   cache::CacheManager cache_manager_;
   stats::Counters counters_;
   std::unique_ptr<stats::Reporter> reporter_;
+  std::unique_ptr<watch::Watcher> watcher_;
 
   net::Socket listener_;
   std::atomic<bool> running_{false};

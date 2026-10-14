@@ -20,6 +20,11 @@ ttl = 60
 max_size = "64M"
 max_file_size = "8M"
 
+[watch]
+enabled = true
+config_reload = true
+invalidate_cache = true
+
 [stats]
 # Built-in dashboard: http://127.0.0.1:6868/statistics.html
 enabled = true

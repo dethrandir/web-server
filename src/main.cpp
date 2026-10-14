@@ -1,6 +1,7 @@
 #include "config/config.hpp"
 #include "log/log.hpp"
 #include "server/server.hpp"
+#include "watch/watcher.hpp"
 
 #include <cxxopts.hpp>
 
@@ -9,6 +10,7 @@
 #include <csignal>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -112,10 +114,33 @@ int run(int argc, char** argv) {
     server.start();
     log::info("{} {} started (press Ctrl+C to stop)", kProgramName, kVersion);
 
+    std::unique_ptr<watch::Watcher> config_watcher;
+    if (has_config && config.watch_enabled && config.watch_config_reload) {
+      const std::filesystem::path config_path = result["config"].as<std::string>();
+      config_watcher = std::make_unique<watch::Watcher>();
+      config_watcher->watch(config_path, [&server, config_path](const watch::Event&) {
+        try {
+          const config::Config updated = config::load(config_path);
+          if (!config::validate(updated).empty()) {
+            log::error("ignoring invalid configuration reload: {}", config_path.string());
+            return;
+          }
+          server.reload(updated);
+        } catch (const std::exception& e) {
+          log::error("failed to reload configuration: {}", e.what());
+        }
+      });
+      config_watcher->start();
+      log::info("watching configuration file '{}' for changes", config_path.string());
+    }
+
     while (!g_stop_requested.load()) {
       std::this_thread::sleep_for(std::chrono::milliseconds{200});
     }
 
+    if (config_watcher != nullptr) {
+      config_watcher->stop();
+    }
     log::info("shutting down");
     server.stop();
     log::info("stopped");

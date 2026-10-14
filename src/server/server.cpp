@@ -268,12 +268,17 @@ struct ActiveConnection {
 }  // namespace
 
 Server::Server(config::Config config)
-    : config_(std::move(config)),
-      cache_manager_(config_.cache_max_bytes, std::chrono::seconds{config_.cache_ttl_seconds},
-                     config_.cache_max_file_bytes) {}
+    : config_(std::make_shared<const config::Config>(std::move(config))),
+      cache_manager_(config_.load()->cache_max_bytes,
+                     std::chrono::seconds{config_.load()->cache_ttl_seconds},
+                     config_.load()->cache_max_file_bytes) {}
 
 Server::~Server() {
   stop();
+}
+
+std::shared_ptr<const config::Config> Server::config() const {
+  return config_.load();
 }
 
 void Server::start() {
@@ -281,14 +286,16 @@ void Server::start() {
     return;
   }
 
-  listener_ = net::listen_tcp(config_.host, config_.port);
+  const std::shared_ptr<const config::Config> cfg = config();
+
+  listener_ = net::listen_tcp(cfg->host, cfg->port);
   port_ = net::local_port(listener_);
   // Wake accept() periodically so stop() can interrupt it without closing the
   // socket from another thread (closing does not reliably wake a blocked accept).
   net::set_receive_timeout(listener_, std::chrono::seconds{1});
   running_.store(true);
 
-  std::size_t worker_count = config_.threads;
+  std::size_t worker_count = cfg->threads;
   if (worker_count == 0) {
     worker_count = std::thread::hardware_concurrency();
     if (worker_count == 0) {
@@ -303,14 +310,16 @@ void Server::start() {
   }
   acceptor_ = std::thread([this] { accept_loop(); });
 
-  if (config_.stats_enabled) {
+  if (cfg->stats_enabled) {
     reporter_ = std::make_unique<stats::Reporter>(
-      [this] { return snapshot(); }, std::filesystem::path{config_.stats_file},
-      std::chrono::seconds{config_.stats_interval_seconds});
+      [this] { return snapshot(); }, std::filesystem::path{cfg->stats_file},
+      std::chrono::seconds{cfg->stats_interval_seconds});
     reporter_->start();
   }
 
-  log::info("listening on {}:{} with {} worker(s)", config_.host, port_, worker_count);
+  setup_watchers(*cfg);
+
+  log::info("listening on {}:{} with {} worker(s)", cfg->host, port_, worker_count);
 }
 
 void Server::stop() {
@@ -318,6 +327,9 @@ void Server::stop() {
     return;
   }
 
+  if (watcher_ != nullptr) {
+    watcher_->stop();
+  }
   if (reporter_ != nullptr) {
     reporter_->stop();
   }
@@ -355,6 +367,81 @@ bool Server::running() const noexcept {
 
 std::uint16_t Server::port() const noexcept {
   return port_;
+}
+
+void Server::reload(const config::Config& updated) {
+  const std::shared_ptr<const config::Config> current = config();
+
+  config::Config applied = updated;
+  // Restart-only fields keep their running values.
+  applied.host = current->host;
+  applied.port = current->port;
+  applied.threads = current->threads;
+  applied.log_path = current->log_path;
+  applied.cache_ttl_seconds = current->cache_ttl_seconds;
+  applied.cache_max_bytes = current->cache_max_bytes;
+  applied.cache_max_file_bytes = current->cache_max_file_bytes;
+  applied.stats_enabled = current->stats_enabled;
+  applied.stats_path = current->stats_path;
+  applied.stats_page = current->stats_page;
+  applied.stats_page_file = current->stats_page_file;
+  applied.stats_file = current->stats_file;
+  applied.stats_interval_seconds = current->stats_interval_seconds;
+  applied.watch_enabled = current->watch_enabled;
+  applied.watch_config_reload = current->watch_config_reload;
+  applied.watch_invalidate_cache = current->watch_invalidate_cache;
+
+  if (updated.host != current->host || updated.port != current->port ||
+      updated.threads != current->threads) {
+    log::warn("config reload: host/port/threads changed; restart required");
+  }
+  if (updated.cache_ttl_seconds != current->cache_ttl_seconds ||
+      updated.cache_max_bytes != current->cache_max_bytes ||
+      updated.cache_max_file_bytes != current->cache_max_file_bytes) {
+    log::warn("config reload: cache settings changed; restart required");
+  }
+  if (updated.stats_enabled != current->stats_enabled ||
+      updated.stats_path != current->stats_path || updated.stats_page != current->stats_page ||
+      updated.stats_file != current->stats_file ||
+      updated.stats_interval_seconds != current->stats_interval_seconds) {
+    log::warn("config reload: stats settings changed; restart required");
+  }
+
+  const std::size_t route_count = applied.routes.size();
+  const std::uint32_t read_timeout = applied.read_timeout_seconds;
+  const std::uint32_t keep_alive_timeout = applied.keep_alive_timeout_seconds;
+  config_.store(std::make_shared<const config::Config>(std::move(applied)));
+  log::info("configuration reloaded: routes={} read_timeout={}s keep_alive={}s", route_count,
+            read_timeout, keep_alive_timeout);
+}
+
+void Server::setup_watchers(const config::Config& cfg) {
+  if (!cfg.watch_enabled || !cfg.watch_invalidate_cache || cfg.routes.empty()) {
+    return;
+  }
+
+  watcher_ = std::make_unique<watch::Watcher>();
+  std::error_code ec;
+  for (const config::Route& route : cfg.routes) {
+    if (std::filesystem::is_directory(route.target, ec)) {
+      const std::filesystem::path directory = route.target;
+      watcher_->watch(directory, [this, directory](const watch::Event&) {
+        const std::size_t removed = cache_manager_.invalidate_prefix(directory);
+        if (removed > 0) {
+          log::debug("cache: invalidated {} file(s) under {}", removed, directory.string());
+        }
+      });
+    } else {
+      const std::filesystem::path file = route.target;
+      watcher_->watch(file, [this, file](const watch::Event&) {
+        if (cache_manager_.invalidate(file)) {
+          log::debug("cache: invalidated {}", file.string());
+        }
+      });
+    }
+  }
+  watcher_->start();
+  log::info("watching {} route target(s) for changes", cfg.routes.size());
 }
 
 void Server::accept_loop() {
@@ -410,20 +497,21 @@ void Server::worker_loop() {
 void Server::handle_connection(net::Socket connection) {
   const ActiveConnection active{counters_.connections_active};
 
-  net::set_receive_timeout(connection, std::chrono::seconds{config_.read_timeout_seconds});
-  net::set_send_timeout(connection, std::chrono::seconds{config_.read_timeout_seconds});
+  const std::shared_ptr<const config::Config> cfg = config();
+
+  net::set_receive_timeout(connection, std::chrono::seconds{cfg->read_timeout_seconds});
+  net::set_send_timeout(connection, std::chrono::seconds{cfg->read_timeout_seconds});
 
   std::string buffer;
   bool first_request = true;
   while (running_.load()) {
     if (!first_request) {
-      net::set_receive_timeout(connection,
-                               std::chrono::seconds{config_.keep_alive_timeout_seconds});
+      net::set_receive_timeout(connection, std::chrono::seconds{cfg->keep_alive_timeout_seconds});
     }
     first_request = false;
 
-    const ReadOutcome outcome = read_one_request(connection, buffer, config_.max_header_bytes,
-                                                 config_.max_body_bytes, counters_);
+    const ReadOutcome outcome =
+      read_one_request(connection, buffer, cfg->max_header_bytes, cfg->max_body_bytes, counters_);
     if (outcome.kind == ReadOutcome::Kind::Closed) {
       break;
     }
@@ -439,7 +527,7 @@ void Server::handle_connection(net::Socket connection) {
 
     counters_.requests.fetch_add(1, std::memory_order_relaxed);
     const bool keep_alive = wants_keep_alive(outcome.request);
-    const int status = respond(connection, outcome.request, keep_alive);
+    const int status = respond(connection, *cfg, outcome.request, keep_alive);
     if (status < 0) {
       break;
     }
@@ -450,7 +538,8 @@ void Server::handle_connection(net::Socket connection) {
   }
 }
 
-int Server::respond(net::Socket& connection, const http::Request& request, bool keep_alive) {
+int Server::respond(net::Socket& connection, const config::Config& cfg,
+                    const http::Request& request, bool keep_alive) {
   const bool include_body = request.method != "HEAD";
 
   const auto send_status = [&](int status, std::string_view content_type, std::string_view body,
@@ -467,10 +556,8 @@ int Server::respond(net::Socket& connection, const http::Request& request, bool 
 
   const std::string request_path = percent_decode(strip_query(request.target));
 
-  if (config_.stats_enabled) {
-    if (request_path == config_.stats_path) {
-      // Counters are read live; process metrics (RSS, CPU%) come from the last
-      // background sample, since CPU usage needs a delta between samples.
+  if (cfg.stats_enabled) {
+    if (request_path == cfg.stats_path) {
       stats::Snapshot current = snapshot();
       if (reporter_ != nullptr) {
         const stats::Snapshot sampled = reporter_->latest();
@@ -485,9 +572,9 @@ int Server::respond(net::Socket& connection, const http::Request& request, bool 
       current.timestamp = stats::utc_timestamp();
       return send_status(200, "application/json", stats::to_json(current));
     }
-    if (request_path == config_.stats_page) {
+    if (request_path == cfg.stats_page) {
       try {
-        const std::string html = io::read_text(config_.stats_page_file);
+        const std::string html = io::read_text(cfg.stats_page_file);
         return send_status(200, "text/html; charset=utf-8", html);
       } catch (const std::exception&) {
         return send_status(500, "text/html; charset=utf-8", error_body(500));
@@ -495,7 +582,7 @@ int Server::respond(net::Socket& connection, const http::Request& request, bool 
     }
   }
 
-  const config::Route* route = config::find_route(config_.routes, request_path);
+  const config::Route* route = config::find_route(cfg.routes, request_path);
   if (route == nullptr) {
     return send_status(404, "text/html; charset=utf-8", error_body(404));
   }
@@ -505,8 +592,6 @@ int Server::respond(net::Socket& connection, const http::Request& request, bool 
     rest.remove_prefix(1);
   }
 
-  // Resolve the on-disk path for the request. Existence is not checked here:
-  // the cache manager may still be able to serve a cached copy.
   std::error_code ec;
   std::filesystem::path file;
   if (std::filesystem::is_directory(route->target, ec)) {
