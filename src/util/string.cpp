@@ -1,47 +1,92 @@
 #include "string.hpp"
 
-#include <stdexcept>
+#include <algorithm>
+#include <cctype>
 
 namespace web_server::util {
 
-// TODO: implement
-std::string_view trim(std::string_view) {
-  throw std::logic_error("web_server::util::trim is not implemented yet");
+std::string_view trim(std::string_view text) {
+  const auto is_space = [](unsigned char ch) { return std::isspace(ch) != 0; };
+
+  const auto begin = std::find_if_not(text.begin(), text.end(), is_space);
+  const auto end = std::find_if_not(text.rbegin(), text.rend(), is_space).base();
+  if (begin >= end) {
+    return {};
+  }
+  return text.substr(static_cast<std::size_t>(begin - text.begin()),
+                     static_cast<std::size_t>(end - begin));
 }
 
-// TODO: implement
-std::string to_lower(std::string_view) {
-  throw std::logic_error("web_server::util::to_lower is not implemented yet");
+std::string to_lower(std::string_view text) {
+  std::string result{text};
+  std::transform(result.begin(), result.end(), result.begin(),
+                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  return result;
 }
 
-// TODO: implement
-std::string to_upper(std::string_view) {
-  throw std::logic_error("web_server::util::to_upper is not implemented yet");
+std::string to_upper(std::string_view text) {
+  std::string result{text};
+  std::transform(result.begin(), result.end(), result.begin(),
+                 [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+  return result;
 }
 
-// TODO: implement
-std::vector<std::string> split(std::string_view, char) {
-  throw std::logic_error("web_server::util::split is not implemented yet");
+std::vector<std::string> split(std::string_view text, char delimiter) {
+  std::vector<std::string> parts;
+  if (text.empty()) {
+    return parts;
+  }
+
+  std::size_t start = 0;
+  while (true) {
+    const std::size_t pos = text.find(delimiter, start);
+    if (pos == std::string_view::npos) {
+      parts.emplace_back(text.substr(start));
+      break;
+    }
+    parts.emplace_back(text.substr(start, pos - start));
+    start = pos + 1;
+  }
+  return parts;
 }
 
-// TODO: implement
-std::string join(const std::vector<std::string>&, std::string_view) {
-  throw std::logic_error("web_server::util::join is not implemented yet");
+std::string join(const std::vector<std::string>& parts, std::string_view delimiter) {
+  std::string result;
+  for (std::size_t i = 0; i < parts.size(); ++i) {
+    if (i != 0) {
+      result.append(delimiter);
+    }
+    result.append(parts[i]);
+  }
+  return result;
 }
 
-// TODO: implement
-bool starts_with(std::string_view, std::string_view) {
-  throw std::logic_error("web_server::util::starts_with is not implemented yet");
+bool starts_with(std::string_view text, std::string_view prefix) {
+  return text.starts_with(prefix);
 }
 
-// TODO: implement
-bool ends_with(std::string_view, std::string_view) {
-  throw std::logic_error("web_server::util::ends_with is not implemented yet");
+bool ends_with(std::string_view text, std::string_view suffix) {
+  return text.ends_with(suffix);
 }
 
-// TODO: implement
-std::string replace_all(std::string_view, std::string_view, std::string_view) {
-  throw std::logic_error("web_server::util::replace_all is not implemented yet");
+std::string replace_all(std::string_view text, std::string_view from, std::string_view to) {
+  if (from.empty()) {
+    return std::string{text};
+  }
+
+  std::string result;
+  std::size_t start = 0;
+  while (true) {
+    const std::size_t pos = text.find(from, start);
+    if (pos == std::string_view::npos) {
+      result.append(text.substr(start));
+      break;
+    }
+    result.append(text.substr(start, pos - start));
+    result.append(to);
+    start = pos + from.size();
+  }
+  return result;
 }
 
 }  // namespace web_server::util
