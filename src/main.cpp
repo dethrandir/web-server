@@ -85,8 +85,8 @@ int run(int argc, char** argv) {
               result.count("verbose") > 0 ? log::Level::Debug : log::Level::Info);
 
     if (has_config) {
-      log::info("loaded configuration: host={} port={} log_path={}", config.host, config.port,
-                to_console ? "(console)" : config.log_path);
+      log::info("loaded configuration: host={} port={} routes={} log_path={}", config.host,
+                config.port, config.routes.size(), to_console ? "(console)" : config.log_path);
     } else {
       log::warn("no configuration file provided (use --config PATH)");
     }

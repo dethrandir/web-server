@@ -5,6 +5,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 namespace web_server {
 
@@ -17,6 +18,11 @@ constexpr std::string_view kExampleConfig = R"(# web-server configuration file
 [server]
 host = "0.0.0.0"
 port = 8080
+
+[routes]
+# Map a request path to a file or directory to serve.
+"/merhaba" = "./public/merhaba.html"
+"/assets" = "./public/assets"
 
 [logging]
 # Path of the log file. Use "-" to log to the console instead.
@@ -44,6 +50,15 @@ Config load(const std::filesystem::path& path) {
     config.port = static_cast<std::uint16_t>(port);
   }
 
+  if (const auto* routes = tbl["routes"].as_table()) {
+    for (const auto& [key, value] : *routes) {
+      Route route;
+      route.path = std::string{key.str()};
+      route.target = value.value_or(std::string{});
+      config.routes.push_back(std::move(route));
+    }
+  }
+
   if (const auto* logging = tbl["logging"].as_table()) {
     config.log_path = (*logging)["path"].value_or(config.log_path);
   }
@@ -56,6 +71,17 @@ std::vector<std::string> validate(const Config& config) {
 
   if (config.host.empty()) {
     errors.emplace_back("server.host must not be empty");
+  }
+
+  for (const Route& route : config.routes) {
+    if (route.path.empty() || route.path.front() != '/') {
+      errors.emplace_back("route path must start with '/': " + route.path);
+    }
+    if (route.target.empty()) {
+      errors.emplace_back("route target must not be empty: " + route.path);
+    } else if (!std::filesystem::exists(route.target)) {
+      errors.emplace_back("route target does not exist: " + route.target);
+    }
   }
 
   if (!config.log_path.empty() && config.log_path != "-") {
@@ -77,6 +103,23 @@ void write_example(const std::filesystem::path& path) {
   if (!out) {
     throw std::runtime_error("could not write configuration file: " + path.string());
   }
+}
+
+const Route* find_route(const std::vector<Route>& routes, std::string_view request_path) {
+  const Route* best = nullptr;
+  for (const Route& route : routes) {
+    if (route.path.empty() || !request_path.starts_with(route.path)) {
+      continue;
+    }
+    if (request_path.size() != route.path.size() && route.path.back() != '/' &&
+        request_path[route.path.size()] != '/') {
+      continue;
+    }
+    if (best == nullptr || route.path.size() > best->path.size()) {
+      best = &route;
+    }
+  }
+  return best;
 }
 
 }  // namespace config
