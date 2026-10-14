@@ -3,17 +3,17 @@
 #include <catch_amalgamated.hpp>
 #include <chrono>
 #include <cstddef>
+#include <memory>
 #include <string>
 
 namespace cache = web_server::cache;
 
 namespace {
 
-cache::CacheEntry make_entry(const std::string& path, std::size_t size) {
-  cache::CacheEntry entry;
-  entry.path = path;
-  entry.content_type = "text/plain";
-  entry.data.resize(size);
+std::shared_ptr<cache::CacheEntry> make_entry(const std::string& path, std::size_t size) {
+  auto entry = std::make_shared<cache::CacheEntry>();
+  entry->path = path;
+  entry->data.resize(size);
   return entry;
 }
 
@@ -33,10 +33,9 @@ TEST_CASE("cache: stores and returns entries", "[cache]") {
   REQUIRE(instance.size() == 1);
   REQUIRE(instance.bytes() == 10);
 
-  const cache::CacheEntry* entry = instance.get("/a.txt");
+  const std::shared_ptr<const cache::CacheEntry> entry = instance.get("/a.txt");
   REQUIRE(entry != nullptr);
   REQUIRE(entry->data.size() == 10);
-  REQUIRE(entry->content_type == "text/plain");
   REQUIRE(instance.get("/missing.txt") == nullptr);
 }
 
@@ -53,7 +52,7 @@ TEST_CASE("cache: evicts the least recently used entry", "[cache]") {
   cache::Cache instance{25, std::chrono::seconds{60}};
   instance.put(make_entry("/a", 10));
   instance.put(make_entry("/b", 10));
-  instance.get("/a");
+  static_cast<void>(instance.get("/a"));
   instance.put(make_entry("/c", 10));
 
   REQUIRE(instance.get("/a") != nullptr);
@@ -63,7 +62,7 @@ TEST_CASE("cache: evicts the least recently used entry", "[cache]") {
 
 TEST_CASE("cache: refuses entries larger than the budget", "[cache]") {
   cache::Cache instance{100, std::chrono::seconds{60}};
-  instance.put(make_entry("/big", 200));
+  REQUIRE(instance.put(make_entry("/big", 200)) == nullptr);
 
   REQUIRE(instance.size() == 0);
   REQUIRE(instance.bytes() == 0);
@@ -90,4 +89,15 @@ TEST_CASE("cache: erase and clear update the byte count", "[cache]") {
   instance.clear();
   REQUIRE(instance.size() == 0);
   REQUIRE(instance.bytes() == 0);
+}
+
+TEST_CASE("cache: a reader keeps its entry alive past eviction", "[cache]") {
+  cache::Cache instance{10, std::chrono::seconds{60}};
+  const std::shared_ptr<const cache::CacheEntry> held = instance.put(make_entry("/a", 10));
+  REQUIRE(held != nullptr);
+
+  instance.put(make_entry("/b", 10));  // evicts /a to make room
+
+  REQUIRE(instance.get("/a") == nullptr);
+  REQUIRE(held->data.size() == 10);  // still valid despite eviction
 }
