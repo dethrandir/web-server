@@ -48,6 +48,16 @@ max_size = "1G"
 # Files larger than this are served directly, without caching.
 max_file_size = "64M"
 
+[stats]
+# Built-in statistics endpoint and dashboard (off by default).
+enabled = false
+path = "/statistics"
+page = "/statistics.html"
+page_file = "static/statistics.html"
+# Optional JSON Lines output; a timestamped sample is appended every interval.
+file = ""
+interval = 5
+
 [logging]
 # Path of the log file. Use "-" to log to the console instead.
 path = "web-server.log"
@@ -164,6 +174,15 @@ Config load(const std::filesystem::path& path) {
     config.cache_ttl_seconds = static_cast<std::uint32_t>(ttl);
     config.cache_max_bytes = read_size(*cache, "max_size", config.cache_max_bytes);
     config.cache_max_file_bytes = read_size(*cache, "max_file_size", config.cache_max_file_bytes);
+  }
+
+  if (const auto* stats = tbl["stats"].as_table()) {
+    config.stats_enabled = (*stats)["enabled"].value_or(config.stats_enabled);
+    config.stats_path = (*stats)["path"].value_or(config.stats_path);
+    config.stats_page = (*stats)["page"].value_or(config.stats_page);
+    config.stats_page_file = (*stats)["page_file"].value_or(config.stats_page_file);
+    config.stats_file = (*stats)["file"].value_or(config.stats_file);
+    config.stats_interval_seconds = read_uint(*stats, "interval", config.stats_interval_seconds);
   }
 
   if (const auto* logging = tbl["logging"].as_table()) {

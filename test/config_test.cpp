@@ -61,6 +61,24 @@ TEST_CASE("config: falls back to defaults for missing settings", "[config]") {
   REQUIRE(cfg.cache_ttl_seconds == 0);
   REQUIRE(cfg.cache_max_bytes == 1024ull * 1024 * 1024);
   REQUIRE(cfg.cache_max_file_bytes == 64ull * 1024 * 1024);
+  REQUIRE_FALSE(cfg.stats_enabled);
+  REQUIRE(cfg.stats_path == "/statistics");
+  REQUIRE(cfg.stats_interval_seconds == 5);
+}
+
+TEST_CASE("config: loads stats settings", "[config]") {
+  const TempFile file{write_fixture("web_server_cfg_stats.toml",
+                                    "[stats]\nenabled = true\npath = \"/stats\"\n"
+                                    "page = \"/stats.html\"\npage_file = \"static/stats.html\"\n"
+                                    "file = \"stats.jsonl\"\ninterval = 2\n")};
+
+  const config::Config cfg = config::load(file.path);
+  REQUIRE(cfg.stats_enabled);
+  REQUIRE(cfg.stats_path == "/stats");
+  REQUIRE(cfg.stats_page == "/stats.html");
+  REQUIRE(cfg.stats_page_file == "static/stats.html");
+  REQUIRE(cfg.stats_file == "stats.jsonl");
+  REQUIRE(cfg.stats_interval_seconds == 2);
 }
 
 TEST_CASE("config: loads server limits and timeouts", "[config]") {

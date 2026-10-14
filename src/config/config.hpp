@@ -38,6 +38,14 @@ struct Config {
   std::size_t cache_max_bytes = 1024ull * 1024 * 1024;
   // Files larger than this are served directly, without entering the cache.
   std::size_t cache_max_file_bytes = 64ull * 1024 * 1024;
+
+  // Built-in statistics endpoint/dashboard (off by default).
+  bool stats_enabled = false;
+  std::string stats_path = "/statistics";                  // JSON endpoint
+  std::string stats_page = "/statistics.html";             // dashboard page
+  std::string stats_page_file = "static/statistics.html";  // page file on disk
+  std::string stats_file;                                  // optional JSON Lines output
+  std::uint32_t stats_interval_seconds = 5;                // sampling interval
 };
 
 Config load(const std::filesystem::path& path);
