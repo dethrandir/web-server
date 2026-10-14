@@ -35,9 +35,9 @@ Config load(const std::filesystem::path& path) {
   Config config;
 
   if (const auto* server = tbl["server"].as_table()) {
-    config.host = server->get("host")->value_or(config.host);
+    config.host = (*server)["host"].value_or(config.host);
 
-    const std::int64_t port = server->get("port")->value_or(static_cast<std::int64_t>(config.port));
+    const std::int64_t port = (*server)["port"].value_or(static_cast<std::int64_t>(config.port));
     if (port < 1 || port > 65535) {
       throw std::runtime_error("server.port must be in range 1-65535");
     }
@@ -45,7 +45,7 @@ Config load(const std::filesystem::path& path) {
   }
 
   if (const auto* logging = tbl["logging"].as_table()) {
-    config.log_path = logging->get("path")->value_or(config.log_path);
+    config.log_path = (*logging)["path"].value_or(config.log_path);
   }
 
   return config;
