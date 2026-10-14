@@ -1,29 +1,77 @@
 #include "cache/cache.hpp"
 
-#include <stdexcept>
+#include <utility>
 
 namespace web_server::cache {
 
+namespace {
+
+std::chrono::steady_clock::time_point now() {
+  return std::chrono::steady_clock::now();
+}
+
+bool expired(const CacheEntry& entry, std::chrono::seconds ttl) {
+  if (ttl.count() == 0) {
+    return true;
+  }
+  return now() - entry.loaded_at >= ttl;
+}
+
+}  // namespace
+
 Cache::Cache(std::size_t max_bytes, std::chrono::seconds ttl) : max_bytes_(max_bytes), ttl_(ttl) {}
 
-// TODO: implement (look up, refresh last_used, drop if expired)
-const CacheEntry* Cache::get(const std::filesystem::path&) {
-  throw std::logic_error("web_server::cache::Cache::get is not implemented yet");
+const CacheEntry* Cache::get(const std::filesystem::path& path) {
+  const auto it = entries_.find(path);
+  if (it == entries_.end()) {
+    return nullptr;
+  }
+  if (expired(it->second, ttl_)) {
+    bytes_ -= it->second.data.size();
+    entries_.erase(it);
+    return nullptr;
+  }
+  it->second.last_used = now();
+  return &it->second;
 }
 
-// TODO: implement (insert/replace, update bytes_, evict to fit)
-void Cache::put(CacheEntry) {
-  throw std::logic_error("web_server::cache::Cache::put is not implemented yet");
+void Cache::put(CacheEntry entry) {
+  const std::size_t incoming = entry.data.size();
+  if (max_bytes_ == 0 || incoming > max_bytes_) {
+    return;
+  }
+
+  evict_expired();
+
+  const auto existing = entries_.find(entry.path);
+  if (existing != entries_.end()) {
+    bytes_ -= existing->second.data.size();
+    entries_.erase(existing);
+  }
+
+  evict_until_fits(incoming);
+
+  entry.loaded_at = now();
+  entry.last_used = entry.loaded_at;
+  bytes_ += incoming;
+
+  const std::filesystem::path key = entry.path;
+  entries_.insert_or_assign(key, std::move(entry));
 }
 
-// TODO: implement
-bool Cache::erase(const std::filesystem::path&) {
-  throw std::logic_error("web_server::cache::Cache::erase is not implemented yet");
+bool Cache::erase(const std::filesystem::path& path) {
+  const auto it = entries_.find(path);
+  if (it == entries_.end()) {
+    return false;
+  }
+  bytes_ -= it->second.data.size();
+  entries_.erase(it);
+  return true;
 }
 
-// TODO: implement
 void Cache::clear() {
-  throw std::logic_error("web_server::cache::Cache::clear is not implemented yet");
+  entries_.clear();
+  bytes_ = 0;
 }
 
 std::size_t Cache::size() const noexcept {
@@ -38,14 +86,28 @@ std::size_t Cache::max_bytes() const noexcept {
   return max_bytes_;
 }
 
-// TODO: implement
 void Cache::evict_expired() {
-  throw std::logic_error("web_server::cache::Cache::evict_expired is not implemented yet");
+  for (auto it = entries_.begin(); it != entries_.end();) {
+    if (expired(it->second, ttl_)) {
+      bytes_ -= it->second.data.size();
+      it = entries_.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
-// TODO: implement
-void Cache::evict_until_fits(std::size_t) {
-  throw std::logic_error("web_server::cache::Cache::evict_until_fits is not implemented yet");
+void Cache::evict_until_fits(std::size_t incoming) {
+  while (bytes_ + incoming > max_bytes_ && !entries_.empty()) {
+    auto victim = entries_.begin();
+    for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+      if (it->second.last_used < victim->second.last_used) {
+        victim = it;
+      }
+    }
+    bytes_ -= victim->second.data.size();
+    entries_.erase(victim);
+  }
 }
 
 }  // namespace web_server::cache
