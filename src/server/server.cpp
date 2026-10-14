@@ -1,6 +1,5 @@
 #include "server/server.hpp"
 
-#include "io/file.hpp"
 #include "log/log.hpp"
 
 #include <cctype>
@@ -256,7 +255,10 @@ bool wants_keep_alive(const http::Request& request) {
 
 }  // namespace
 
-Server::Server(config::Config config) : config_(std::move(config)) {}
+Server::Server(config::Config config)
+    : config_(std::move(config)),
+      cache_manager_(config_.cache_max_bytes, std::chrono::seconds{config_.cache_ttl_seconds},
+                     config_.cache_max_file_bytes) {}
 
 Server::~Server() {
   stop();
@@ -436,14 +438,11 @@ bool Server::respond(net::Socket& connection, const http::Request& request, bool
     rest.remove_prefix(1);
   }
 
+  // Resolve the on-disk path for the request. Existence is not checked here:
+  // the cache manager may still be able to serve a cached copy.
   std::error_code ec;
   std::filesystem::path file;
-  if (std::filesystem::is_regular_file(route->target, ec)) {
-    if (!rest.empty()) {
-      return send_simple(404, "text/html; charset=utf-8", error_body(404));
-    }
-    file = route->target;
-  } else if (std::filesystem::is_directory(route->target, ec)) {
+  if (std::filesystem::is_directory(route->target, ec)) {
     const std::filesystem::path relative{std::string{rest}};
     for (const std::filesystem::path& part : relative) {
       if (part == "..") {
@@ -451,26 +450,24 @@ bool Server::respond(net::Socket& connection, const http::Request& request, bool
       }
     }
     file = std::filesystem::path{route->target} / relative;
+    if (std::filesystem::is_directory(file, ec)) {
+      file /= "index.html";
+    }
   } else {
+    if (!rest.empty()) {
+      return send_simple(404, "text/html; charset=utf-8", error_body(404));
+    }
+    file = route->target;
+  }
+
+  const std::shared_ptr<const cache::CacheEntry> entry = cache_manager_.get(file);
+  if (entry == nullptr) {
     return send_simple(404, "text/html; charset=utf-8", error_body(404));
   }
 
-  if (std::filesystem::is_directory(file, ec)) {
-    file /= "index.html";
-  }
-  if (!std::filesystem::is_regular_file(file, ec)) {
-    return send_simple(404, "text/html; charset=utf-8", error_body(404));
-  }
-
-  std::vector<std::byte> data;
-  try {
-    data = io::read_bytes(file);
-  } catch (const std::exception&) {
-    return send_simple(500, "text/html; charset=utf-8", error_body(500));
-  }
-
-  const std::string_view body{reinterpret_cast<const char*>(data.data()), data.size()};
-  return send_all(connection, build_response(200, data.size(), content_type_for(file), body,
+  const std::string_view body{reinterpret_cast<const char*>(entry->data.data()),
+                              entry->data.size()};
+  return send_all(connection, build_response(200, entry->data.size(), content_type_for(file), body,
                                              include_body, keep_alive));
 }
 

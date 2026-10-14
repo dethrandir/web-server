@@ -149,3 +149,26 @@ TEST_CASE("server: blocks path traversal", "[server]") {
 
   instance.stop();
 }
+
+TEST_CASE("server: serves a cached file after it is removed", "[server]") {
+  const Fixture fixture;
+  config::Config cfg = make_config(fixture.dir);
+  cfg.cache_ttl_seconds = 60;
+  cfg.cache_max_bytes = 1024 * 1024;
+
+  server::Server instance{cfg};
+  instance.start();
+
+  const std::string first =
+    round_trip(instance.port(), "GET /hello HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+  REQUIRE(first.find("hello world") != std::string::npos);
+
+  std::filesystem::remove(fixture.file);
+
+  const std::string second =
+    round_trip(instance.port(), "GET /hello HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+  REQUIRE(second.starts_with("HTTP/1.1 200"));
+  REQUIRE(second.find("hello world") != std::string::npos);
+
+  instance.stop();
+}

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cache/manager.hpp"
 #include "config/config.hpp"
 #include "http/http.hpp"
 #include "net/socket.hpp"
@@ -47,6 +48,7 @@ private:
   bool respond(net::Socket& connection, const http::Request& request, bool keep_alive);
 
   config::Config config_;
+  cache::CacheManager cache_manager_;
   net::Socket listener_;
   std::atomic<bool> running_{false};
   std::uint16_t port_ = 0;
