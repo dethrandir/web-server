@@ -31,8 +31,8 @@ private:
 // Creates a TCP socket bound to host:port and put into the listening state.
 [[nodiscard]] Socket listen_tcp(std::string_view host, std::uint16_t port, int backlog = 128);
 
-// Connects the given socket to host:port.
-void connect(Socket& socket, std::string_view host, std::uint16_t port);
+// Creates a TCP socket connected to host:port.
+[[nodiscard]] Socket connect_tcp(std::string_view host, std::uint16_t port);
 
 // Accepts a pending connection from a listening socket.
 [[nodiscard]] Socket accept(const Socket& server);
@@ -40,7 +40,7 @@ void connect(Socket& socket, std::string_view host, std::uint16_t port);
 // Sends data, returning the number of bytes written.
 std::size_t send(Socket& socket, std::span<const std::byte> data);
 
-// Receives data into buffer, returning the number of bytes read.
+// Receives data into buffer, returning the number of bytes read (0 on EOF).
 std::size_t receive(Socket& socket, std::span<std::byte> buffer);
 
 // Enables or disables SO_REUSEADDR on the socket.
