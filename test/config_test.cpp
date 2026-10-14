@@ -66,6 +66,17 @@ TEST_CASE("config: falls back to defaults for missing settings", "[config]") {
   REQUIRE(cfg.stats_interval_seconds == 5);
 }
 
+TEST_CASE("config: loads watch settings", "[config]") {
+  const TempFile file{write_fixture("web_server_cfg_watch.toml",
+                                    "[watch]\nenabled = true\nconfig_reload = true\n"
+                                    "invalidate_cache = false\n")};
+
+  const config::Config cfg = config::load(file.path);
+  REQUIRE(cfg.watch_enabled);
+  REQUIRE(cfg.watch_config_reload);
+  REQUIRE_FALSE(cfg.watch_invalidate_cache);
+}
+
 TEST_CASE("config: loads stats settings", "[config]") {
   const TempFile file{write_fixture("web_server_cfg_stats.toml",
                                     "[stats]\nenabled = true\npath = \"/stats\"\n"

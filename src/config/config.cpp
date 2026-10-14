@@ -58,6 +58,14 @@ page_file = "static/statistics.html"
 file = ""
 interval = 5
 
+[watch]
+# Watch files with inotify (off by default).
+enabled = false
+# Reload the configuration when its file changes.
+config_reload = false
+# Evict a cached file as soon as it changes on disk.
+invalidate_cache = true
+
 [logging]
 # Path of the log file. Use "-" to log to the console instead.
 path = "web-server.log"
@@ -183,6 +191,13 @@ Config load(const std::filesystem::path& path) {
     config.stats_page_file = (*stats)["page_file"].value_or(config.stats_page_file);
     config.stats_file = (*stats)["file"].value_or(config.stats_file);
     config.stats_interval_seconds = read_uint(*stats, "interval", config.stats_interval_seconds);
+  }
+
+  if (const auto* watch = tbl["watch"].as_table()) {
+    config.watch_enabled = (*watch)["enabled"].value_or(config.watch_enabled);
+    config.watch_config_reload = (*watch)["config_reload"].value_or(config.watch_config_reload);
+    config.watch_invalidate_cache =
+      (*watch)["invalidate_cache"].value_or(config.watch_invalidate_cache);
   }
 
   if (const auto* logging = tbl["logging"].as_table()) {

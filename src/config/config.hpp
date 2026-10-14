@@ -46,6 +46,11 @@ struct Config {
   std::string stats_page_file = "static/statistics.html";  // page file on disk
   std::string stats_file;                                  // optional JSON Lines output
   std::uint32_t stats_interval_seconds = 5;                // sampling interval
+
+  // Live watching of files (inotify).
+  bool watch_enabled = false;
+  bool watch_config_reload = false;    // reload config on change
+  bool watch_invalidate_cache = true;  // evict cached files when they change
 };
 
 Config load(const std::filesystem::path& path);
