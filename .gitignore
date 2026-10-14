@@ -22,8 +22,9 @@ compile_commands.json
 *.out
 *.app
 
-# Logs
+# Logs and generated statistics
 *.log
+*.jsonl
 
 # Editor / IDE
 .idea/

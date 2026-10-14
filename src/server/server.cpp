@@ -1,5 +1,6 @@
 #include "server/server.hpp"
 
+#include "io/file.hpp"
 #include "log/log.hpp"
 
 #include <cctype>
@@ -158,7 +159,7 @@ std::string build_response(int status, std::size_t content_length, std::string_v
   return response;
 }
 
-bool send_all(net::Socket& connection, std::string_view data) {
+bool send_all(net::Socket& connection, std::string_view data, stats::Counters& counters) {
   std::size_t sent = 0;
   while (sent < data.size()) {
     try {
@@ -167,6 +168,7 @@ bool send_all(net::Socket& connection, std::string_view data) {
         return false;
       }
       sent += count;
+      counters.bytes_sent.fetch_add(count, std::memory_order_relaxed);
     } catch (const std::exception&) {
       return false;
     }
@@ -174,7 +176,7 @@ bool send_all(net::Socket& connection, std::string_view data) {
   return true;
 }
 
-bool recv_into(net::Socket& connection, std::string& buffer) {
+bool recv_into(net::Socket& connection, std::string& buffer, stats::Counters& counters) {
   std::byte chunk[4096];
   try {
     const std::size_t count = net::receive(connection, chunk);
@@ -182,6 +184,7 @@ bool recv_into(net::Socket& connection, std::string& buffer) {
       return false;
     }
     buffer.append(reinterpret_cast<const char*>(chunk), count);
+    counters.bytes_received.fetch_add(count, std::memory_order_relaxed);
     return true;
   } catch (const std::exception&) {
     return false;
@@ -196,14 +199,14 @@ struct ReadOutcome {
 };
 
 ReadOutcome read_one_request(net::Socket& connection, std::string& buffer, std::size_t max_header,
-                             std::size_t max_body) {
+                             std::size_t max_body, stats::Counters& counters) {
   while (true) {
     const std::size_t header_end = buffer.find("\r\n\r\n");
     if (header_end == std::string::npos) {
       if (buffer.size() > max_header) {
         return {ReadOutcome::Kind::Error, 431, {}};
       }
-      if (!recv_into(connection, buffer)) {
+      if (!recv_into(connection, buffer, counters)) {
         return {ReadOutcome::Kind::Closed, 0, {}};
       }
       continue;
@@ -224,7 +227,7 @@ ReadOutcome read_one_request(net::Socket& connection, std::string& buffer, std::
 
     const std::size_t total = header_end + 4 + body_length;
     while (buffer.size() < total) {
-      if (!recv_into(connection, buffer)) {
+      if (!recv_into(connection, buffer, counters)) {
         return {ReadOutcome::Kind::Closed, 0, {}};
       }
     }
@@ -252,6 +255,15 @@ bool wants_keep_alive(const http::Request& request) {
   }
   return request.version == "HTTP/1.1";
 }
+
+// RAII guard around the active-connection gauge.
+struct ActiveConnection {
+  std::atomic<std::uint64_t>& counter;
+  explicit ActiveConnection(std::atomic<std::uint64_t>& target) : counter(target) {
+    counter.fetch_add(1, std::memory_order_relaxed);
+  }
+  ~ActiveConnection() { counter.fetch_sub(1, std::memory_order_relaxed); }
+};
 
 }  // namespace
 
@@ -283,6 +295,7 @@ void Server::start() {
       worker_count = 4;
     }
   }
+  counters_.workers_total.store(worker_count, std::memory_order_relaxed);
 
   workers_.reserve(worker_count);
   for (std::size_t i = 0; i < worker_count; ++i) {
@@ -290,12 +303,23 @@ void Server::start() {
   }
   acceptor_ = std::thread([this] { accept_loop(); });
 
+  if (config_.stats_enabled) {
+    reporter_ = std::make_unique<stats::Reporter>(
+      [this] { return snapshot(); }, std::filesystem::path{config_.stats_file},
+      std::chrono::seconds{config_.stats_interval_seconds});
+    reporter_->start();
+  }
+
   log::info("listening on {}:{} with {} worker(s)", config_.host, port_, worker_count);
 }
 
 void Server::stop() {
   if (!running_.exchange(false)) {
     return;
+  }
+
+  if (reporter_ != nullptr) {
+    reporter_->stop();
   }
 
   queue_cv_.notify_all();
@@ -340,6 +364,7 @@ void Server::accept_loop() {
       if (!running_.load()) {
         break;
       }
+      counters_.connections_accepted.fetch_add(1, std::memory_order_relaxed);
       enqueue(std::move(connection));
     } catch (const std::exception&) {
       if (!running_.load()) {
@@ -353,6 +378,7 @@ void Server::enqueue(net::Socket connection) {
   {
     std::lock_guard lock{mutex_};
     queue_.push_back(std::move(connection));
+    counters_.queue_length.store(queue_.size(), std::memory_order_relaxed);
   }
   queue_cv_.notify_one();
 }
@@ -368,17 +394,22 @@ void Server::worker_loop() {
       }
       connection = std::move(queue_.front());
       queue_.pop_front();
+      counters_.queue_length.store(queue_.size(), std::memory_order_relaxed);
     }
 
+    counters_.workers_busy.fetch_add(1, std::memory_order_relaxed);
     try {
       handle_connection(std::move(connection));
     } catch (const std::exception& e) {
       log::error("connection handling failed: {}", e.what());
     }
+    counters_.workers_busy.fetch_sub(1, std::memory_order_relaxed);
   }
 }
 
 void Server::handle_connection(net::Socket connection) {
+  const ActiveConnection active{counters_.connections_active};
+
   net::set_receive_timeout(connection, std::chrono::seconds{config_.read_timeout_seconds});
   net::set_send_timeout(connection, std::chrono::seconds{config_.read_timeout_seconds});
 
@@ -391,46 +422,82 @@ void Server::handle_connection(net::Socket connection) {
     }
     first_request = false;
 
-    const ReadOutcome outcome =
-      read_one_request(connection, buffer, config_.max_header_bytes, config_.max_body_bytes);
+    const ReadOutcome outcome = read_one_request(connection, buffer, config_.max_header_bytes,
+                                                 config_.max_body_bytes, counters_);
     if (outcome.kind == ReadOutcome::Kind::Closed) {
       break;
     }
     if (outcome.kind == ReadOutcome::Kind::Error) {
       const std::string body = error_body(outcome.status);
-      send_all(connection, build_response(outcome.status, body.size(), "text/html; charset=utf-8",
-                                          body, true, false));
+      send_all(
+        connection,
+        build_response(outcome.status, body.size(), "text/html; charset=utf-8", body, true, false),
+        counters_);
+      count_response(outcome.status);
       break;
     }
 
+    counters_.requests.fetch_add(1, std::memory_order_relaxed);
     const bool keep_alive = wants_keep_alive(outcome.request);
-    if (!respond(connection, outcome.request, keep_alive)) {
+    const int status = respond(connection, outcome.request, keep_alive);
+    if (status < 0) {
       break;
     }
+    count_response(status);
     if (!keep_alive) {
       break;
     }
   }
 }
 
-bool Server::respond(net::Socket& connection, const http::Request& request, bool keep_alive) {
+int Server::respond(net::Socket& connection, const http::Request& request, bool keep_alive) {
   const bool include_body = request.method != "HEAD";
 
-  const auto send_simple = [&](int status, std::string_view content_type, std::string_view body,
-                               std::span<const http::Header> extra = {}) {
-    return send_all(connection, build_response(status, body.size(), content_type, body,
-                                               include_body, keep_alive, extra));
+  const auto send_status = [&](int status, std::string_view content_type, std::string_view body,
+                               std::span<const http::Header> extra = {}) -> int {
+    const std::string response =
+      build_response(status, body.size(), content_type, body, include_body, keep_alive, extra);
+    return send_all(connection, response, counters_) ? status : -1;
   };
 
   if (request.method != "GET" && request.method != "HEAD") {
     const http::Header allow{"Allow", "GET, HEAD"};
-    return send_simple(405, "text/html; charset=utf-8", error_body(405), std::span{&allow, 1});
+    return send_status(405, "text/html; charset=utf-8", error_body(405), std::span{&allow, 1});
   }
 
   const std::string request_path = percent_decode(strip_query(request.target));
+
+  if (config_.stats_enabled) {
+    if (request_path == config_.stats_path) {
+      // Counters are read live; process metrics (RSS, CPU%) come from the last
+      // background sample, since CPU usage needs a delta between samples.
+      stats::Snapshot current = snapshot();
+      if (reporter_ != nullptr) {
+        const stats::Snapshot sampled = reporter_->latest();
+        current.rss_bytes = sampled.rss_bytes;
+        current.cpu_seconds = sampled.cpu_seconds;
+        current.cpu_percent = sampled.cpu_percent;
+        current.uptime_seconds = sampled.uptime_seconds;
+      } else {
+        current.rss_bytes = stats::read_rss_bytes();
+        current.cpu_seconds = stats::read_process_cpu_seconds();
+      }
+      current.timestamp = stats::utc_timestamp();
+      return send_status(200, "application/json", stats::to_json(current));
+    }
+    if (request_path == config_.stats_page) {
+      try {
+        const std::string html = io::read_text(config_.stats_page_file);
+        return send_status(200, "text/html; charset=utf-8", html);
+      } catch (const std::exception&) {
+        return send_status(500, "text/html; charset=utf-8", error_body(500));
+      }
+    }
+  }
+
   const config::Route* route = config::find_route(config_.routes, request_path);
   if (route == nullptr) {
-    return send_simple(404, "text/html; charset=utf-8", error_body(404));
+    return send_status(404, "text/html; charset=utf-8", error_body(404));
   }
 
   std::string_view rest = std::string_view{request_path}.substr(route->path.size());
@@ -446,7 +513,7 @@ bool Server::respond(net::Socket& connection, const http::Request& request, bool
     const std::filesystem::path relative{std::string{rest}};
     for (const std::filesystem::path& part : relative) {
       if (part == "..") {
-        return send_simple(403, "text/html; charset=utf-8", error_body(403));
+        return send_status(403, "text/html; charset=utf-8", error_body(403));
       }
     }
     file = std::filesystem::path{route->target} / relative;
@@ -455,20 +522,61 @@ bool Server::respond(net::Socket& connection, const http::Request& request, bool
     }
   } else {
     if (!rest.empty()) {
-      return send_simple(404, "text/html; charset=utf-8", error_body(404));
+      return send_status(404, "text/html; charset=utf-8", error_body(404));
     }
     file = route->target;
   }
 
   const std::shared_ptr<const cache::CacheEntry> entry = cache_manager_.get(file);
   if (entry == nullptr) {
-    return send_simple(404, "text/html; charset=utf-8", error_body(404));
+    return send_status(404, "text/html; charset=utf-8", error_body(404));
   }
 
   const std::string_view body{reinterpret_cast<const char*>(entry->data.data()),
                               entry->data.size()};
-  return send_all(connection, build_response(200, entry->data.size(), content_type_for(file), body,
-                                             include_body, keep_alive));
+  return send_status(200, content_type_for(file), body);
+}
+
+stats::Snapshot Server::snapshot() const {
+  stats::Snapshot snapshot;
+  snapshot.requests = counters_.requests.load(std::memory_order_relaxed);
+  snapshot.responses_2xx = counters_.responses_2xx.load(std::memory_order_relaxed);
+  snapshot.responses_3xx = counters_.responses_3xx.load(std::memory_order_relaxed);
+  snapshot.responses_4xx = counters_.responses_4xx.load(std::memory_order_relaxed);
+  snapshot.responses_5xx = counters_.responses_5xx.load(std::memory_order_relaxed);
+  snapshot.connections_accepted = counters_.connections_accepted.load(std::memory_order_relaxed);
+  snapshot.connections_active = counters_.connections_active.load(std::memory_order_relaxed);
+  snapshot.bytes_received = counters_.bytes_received.load(std::memory_order_relaxed);
+  snapshot.bytes_sent = counters_.bytes_sent.load(std::memory_order_relaxed);
+  snapshot.workers_total = counters_.workers_total.load(std::memory_order_relaxed);
+  snapshot.workers_busy = counters_.workers_busy.load(std::memory_order_relaxed);
+  snapshot.queue_length = counters_.queue_length.load(std::memory_order_relaxed);
+
+  const cache::CacheStats cache = cache_manager_.stats();
+  snapshot.cache_entries = cache.entries;
+  snapshot.cache_bytes = cache.bytes;
+  snapshot.cache_hits = cache.hits;
+  snapshot.cache_misses = cache.misses;
+  snapshot.cache_evictions = cache.evictions;
+
+  const std::uint64_t lookups = snapshot.cache_hits + snapshot.cache_misses;
+  if (lookups > 0) {
+    snapshot.cache_hit_ratio =
+      static_cast<double>(snapshot.cache_hits) / static_cast<double>(lookups);
+  }
+  return snapshot;
+}
+
+void Server::count_response(int status) noexcept {
+  if (status >= 200 && status < 300) {
+    counters_.responses_2xx.fetch_add(1, std::memory_order_relaxed);
+  } else if (status >= 300 && status < 400) {
+    counters_.responses_3xx.fetch_add(1, std::memory_order_relaxed);
+  } else if (status >= 400 && status < 500) {
+    counters_.responses_4xx.fetch_add(1, std::memory_order_relaxed);
+  } else if (status >= 500) {
+    counters_.responses_5xx.fetch_add(1, std::memory_order_relaxed);
+  }
 }
 
 }  // namespace web_server::server

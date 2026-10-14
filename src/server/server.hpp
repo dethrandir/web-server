@@ -4,12 +4,16 @@
 #include "config/config.hpp"
 #include "http/http.hpp"
 #include "net/socket.hpp"
+#include "stats/reporter.hpp"
+#include "stats/stats.hpp"
 
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -45,10 +49,15 @@ private:
   void worker_loop();
   void enqueue(net::Socket connection);
   void handle_connection(net::Socket connection);
-  bool respond(net::Socket& connection, const http::Request& request, bool keep_alive);
+  int respond(net::Socket& connection, const http::Request& request, bool keep_alive);
+  [[nodiscard]] stats::Snapshot snapshot() const;
+  void count_response(int status) noexcept;
 
   config::Config config_;
   cache::CacheManager cache_manager_;
+  stats::Counters counters_;
+  std::unique_ptr<stats::Reporter> reporter_;
+
   net::Socket listener_;
   std::atomic<bool> running_{false};
   std::uint16_t port_ = 0;

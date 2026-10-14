@@ -150,6 +150,36 @@ TEST_CASE("server: blocks path traversal", "[server]") {
   instance.stop();
 }
 
+TEST_CASE("server: exposes the statistics endpoint and page", "[server]") {
+  const Fixture fixture;
+  const std::filesystem::path page = fixture.dir / "stats.html";
+  {
+    std::ofstream out(page, std::ios::binary);
+    out << "<html>stats page</html>";
+  }
+
+  config::Config cfg = make_config(fixture.dir);
+  cfg.stats_enabled = true;
+  cfg.stats_page_file = page.string();
+
+  server::Server instance{cfg};
+  instance.start();
+
+  const std::string json =
+    round_trip(instance.port(), "GET /statistics HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+  REQUIRE(json.starts_with("HTTP/1.1 200"));
+  REQUIRE(json.find("application/json") != std::string::npos);
+  REQUIRE(json.find("\"cache\"") != std::string::npos);
+  REQUIRE(json.find("\"hit_ratio\"") != std::string::npos);
+
+  const std::string html = round_trip(
+    instance.port(), "GET /statistics.html HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+  REQUIRE(html.starts_with("HTTP/1.1 200"));
+  REQUIRE(html.find("stats page") != std::string::npos);
+
+  instance.stop();
+}
+
 TEST_CASE("server: serves a cached file after it is removed", "[server]") {
   const Fixture fixture;
   config::Config cfg = make_config(fixture.dir);

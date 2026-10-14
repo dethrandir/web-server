@@ -97,9 +97,9 @@ int run(int argc, char** argv) {
 
     if (has_config) {
       log::info("loaded configuration: host={} port={} threads={} routes={} cache_ttl={}s "
-                "cache_max={}B log_path={}",
+                "cache_max={}B stats={} log_path={}",
                 config.host, config.port, config.threads, config.routes.size(),
-                config.cache_ttl_seconds, config.cache_max_bytes,
+                config.cache_ttl_seconds, config.cache_max_bytes, config.stats_enabled,
                 to_console ? "(console)" : config.log_path);
     } else {
       log::warn("no configuration file provided (use --config PATH)");

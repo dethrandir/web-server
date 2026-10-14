@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web-server — statistics</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f172a;
+        --card: #1e293b;
+        --muted: #94a3b8;
+        --text: #e2e8f0;
+        --accent: #38bdf8;
+        --good: #4ade80;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 2rem;
+        background: var(--bg);
+        color: var(--text);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      h1 {
+        margin: 0 0 0.25rem;
+        font-size: 1.5rem;
+      }
+      .sub {
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+        font-size: 0.9rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+        gap: 1rem;
+      }
+      .card {
+        background: var(--card);
+        border-radius: 0.75rem;
+        padding: 1rem 1.25rem;
+      }
+      .card h2 {
+        margin: 0 0 0.5rem;
+        font-size: 0.8rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .value {
+        font-size: 1.75rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .value small {
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+      .bar {
+        height: 0.5rem;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.25);
+        overflow: hidden;
+        margin-top: 0.75rem;
+      }
+      .bar > span {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: var(--good);
+        transition: width 0.3s ease;
+      }
+      pre {
+        background: #0b1220;
+        border-radius: 0.75rem;
+        padding: 1rem;
+        overflow: auto;
+        font-size: 0.8rem;
+        margin-top: 1.5rem;
+      }
+      .err {
+        color: #f87171;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>web-server · statistics</h1>
+    <div class="sub">
+      Canlı metrikler · <span id="updated">yükleniyor…</span>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Uptime</h2>
+        <div class="value" id="uptime">–</div>
+      </div>
+      <div class="card">
+        <h2>İstek (toplam)</h2>
+        <div class="value" id="requests">–</div>
+      </div>
+      <div class="card">
+        <h2>Aktif bağlantı</h2>
+        <div class="value" id="active">–</div>
+      </div>
+      <div class="card">
+        <h2>Cache hit oranı</h2>
+        <div class="value" id="hitratio">–</div>
+        <div class="bar"><span id="hitbar"></span></div>
+      </div>
+      <div class="card">
+        <h2>Cache (girdi)</h2>
+        <div class="value" id="cacheentries">–</div>
+      </div>
+      <div class="card">
+        <h2>Cache (bellek)</h2>
+        <div class="value" id="cachebytes">–</div>
+      </div>
+      <div class="card">
+        <h2>Gelen veri</h2>
+        <div class="value" id="received">–</div>
+      </div>
+      <div class="card">
+        <h2>Giden veri</h2>
+        <div class="value" id="sent">–</div>
+      </div>
+      <div class="card">
+        <h2>Worker (meşgul / toplam)</h2>
+        <div class="value" id="workers">–</div>
+      </div>
+      <div class="card">
+        <h2>RAM (RSS)</h2>
+        <div class="value" id="rss">–</div>
+      </div>
+      <div class="card">
+        <h2>CPU</h2>
+        <div class="value" id="cpu">–</div>
+      </div>
+      <div class="card">
+        <h2>Yanıtlar</h2>
+        <div class="value" id="responses">–</div>
+      </div>
+    </div>
+
+    <pre id="raw">–</pre>
+
+    <script>
+      const params = new URLSearchParams(location.search);
+      const endpoint = params.get("endpoint") || "/statistics";
+
+      const fmtInt = (n) => new Intl.NumberFormat("tr-TR").format(n);
+      const fmtBytes = (n) => {
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let value = n;
+        let unit = 0;
+        while (value >= 1024 && unit < units.length - 1) {
+          value /= 1024;
+          unit += 1;
+        }
+        return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+      };
+      const fmtDuration = (seconds) => {
+        const s = Math.floor(seconds % 60);
+        const m = Math.floor((seconds / 60) % 60);
+        const h = Math.floor(seconds / 3600);
+        if (h > 0) return `${h}s ${m}dk`;
+        if (m > 0) return `${m}dk ${s}sn`;
+        return `${s}sn`;
+      };
+      const set = (id, text) => {
+        document.getElementById(id).textContent = text;
+      };
+
+      async function refresh() {
+        try {
+          const response = await fetch(endpoint, { headers: { Accept: "application/json" } });
+          const data = await response.json();
+
+          set("uptime", fmtDuration(data.uptime_seconds));
+          set("requests", fmtInt(data.requests.total));
+          set("active", fmtInt(data.connections.active));
+          set("cacheentries", fmtInt(data.cache.entries));
+          set("cachebytes", fmtBytes(data.cache.bytes));
+          set("received", fmtBytes(data.bytes.received));
+          set("sent", fmtBytes(data.bytes.sent));
+          set("workers", `${data.workers.busy} / ${data.workers.total} (+${data.workers.queue})`);
+          set("rss", fmtBytes(data.process.rss_bytes));
+          set("cpu", `${data.process.cpu_percent.toFixed(1)}%`);
+          set(
+            "responses",
+            `${data.requests["2xx"]} · ${data.requests["3xx"]} · ${data.requests["4xx"]} · ${data.requests["5xx"]}`,
+          );
+
+          const ratio = (data.cache.hit_ratio || 0) * 100;
+          set("hitratio", `${ratio.toFixed(1)}%`);
+          document.getElementById("hitbar").style.width = `${Math.min(ratio, 100)}%`;
+
+          set("updated", `son güncelleme: ${data.timestamp}`);
+          document.getElementById("raw").textContent = JSON.stringify(data, null, 2);
+        } catch (error) {
+          set("updated", "bağlantı hatası");
+          document.getElementById("raw").textContent = String(error);
+          document.getElementById("raw").classList.add("err");
+        }
+      }
+
+      refresh();
+      setInterval(refresh, 2000);
+    </script>
+  </body>
+</html>

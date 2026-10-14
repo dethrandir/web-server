@@ -20,6 +20,15 @@ ttl = 60
 max_size = "64M"
 max_file_size = "8M"
 
+[stats]
+# Built-in dashboard: http://127.0.0.1:6868/statistics.html
+enabled = true
+path = "/statistics"
+page = "/statistics.html"
+page_file = "static/statistics.html"
+file = "stats.jsonl"
+interval = 2
+
 [logging]
 # Use "-" to log to the console.
 path = "-"
