@@ -3,6 +3,7 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -56,7 +57,11 @@ void set_level(Level level) {
 }
 
 void shutdown() {
-  spdlog::shutdown();
+  spdlog::apply_all([](const std::shared_ptr<spdlog::logger>& logger) { logger->flush(); });
+  spdlog::drop_all();
+  // Leave a valid default logger behind so logging after shutdown stays safe
+  // (spdlog::drop_all() nulls the default logger, which spdlog::info() dereferences).
+  spdlog::set_default_logger(spdlog::stderr_color_mt(std::string{kLoggerName}));
 }
 
 }  // namespace web_server::log
