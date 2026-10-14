@@ -1,0 +1,25 @@
+# web-server configuration (demo)
+
+[server]
+host = "127.0.0.1"
+port = 6868
+threads = 4
+keep_alive_timeout = 5
+read_timeout = 15
+max_header_bytes = 16384
+max_body_bytes = 1048576
+
+[routes]
+# Serve the demo site from the ./demo directory.
+"/" = "./demo"
+# A single-file route example.
+"/merhaba" = "./demo/about.html"
+
+[cache]
+ttl = 60
+max_size = "64M"
+max_file_size = "8M"
+
+[logging]
+# Use "-" to log to the console.
+path = "-"
