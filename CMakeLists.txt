@@ -65,3 +65,22 @@ target_include_directories(web_server_tests PRIVATE
 )
 
 add_test(NAME web_server_tests COMMAND web_server_tests)
+
+# Benchmarks (built but not run by ctest; run manually).
+option(WEB_SERVER_BUILD_BENCH "Build the benchmark harness" ON)
+
+if(WEB_SERVER_BUILD_BENCH)
+    file(GLOB BENCH_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/bench/*.cpp"
+    )
+
+    add_executable(web_server_bench ${BENCH_SOURCES})
+    target_link_libraries(web_server_bench PRIVATE web_server_core)
+    target_include_directories(web_server_bench PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/bench"
+    )
+
+    if(NOT MSVC)
+        target_compile_options(web_server_bench PRIVATE -O2)
+    endif()
+endif()
