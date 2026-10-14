@@ -53,6 +53,44 @@ TEST_CASE("config: falls back to defaults for missing settings", "[config]") {
   REQUIRE(cfg.port == 8080);
   REQUIRE(cfg.log_path.empty());
   REQUIRE(cfg.routes.empty());
+  REQUIRE(cfg.cache_ttl_seconds == 0);
+  REQUIRE(cfg.cache_max_bytes == 1024ull * 1024 * 1024);
+  REQUIRE(cfg.cache_max_file_bytes == 64ull * 1024 * 1024);
+}
+
+TEST_CASE("config: parses cache memory limits", "[config]") {
+  const TempFile file{write_fixture("web_server_cfg_cache_size.toml",
+                                    "[cache]\nttl = 1\nmax_size = \"1G\"\n"
+                                    "max_file_size = \"64M\"\n")};
+
+  const config::Config cfg = config::load(file.path);
+  REQUIRE(cfg.cache_max_bytes == 1024ull * 1024 * 1024);
+  REQUIRE(cfg.cache_max_file_bytes == 64ull * 1024 * 1024);
+}
+
+TEST_CASE("config: accepts a plain integer cache size", "[config]") {
+  const TempFile file{write_fixture("web_server_cfg_cache_int.toml", "[cache]\nmax_size = 2048\n")};
+
+  const config::Config cfg = config::load(file.path);
+  REQUIRE(cfg.cache_max_bytes == 2048);
+}
+
+TEST_CASE("config: rejects an invalid cache size", "[config]") {
+  const TempFile file{
+    write_fixture("web_server_cfg_cache_bad_size.toml", "[cache]\nmax_size = \"1X\"\n")};
+  REQUIRE_THROWS_AS(config::load(file.path), std::runtime_error);
+}
+
+TEST_CASE("config: loads the cache ttl", "[config]") {
+  const TempFile file{write_fixture("web_server_cfg_cache.toml", "[cache]\nttl = 120\n")};
+
+  const config::Config cfg = config::load(file.path);
+  REQUIRE(cfg.cache_ttl_seconds == 120);
+}
+
+TEST_CASE("config: rejects a negative cache ttl", "[config]") {
+  const TempFile file{write_fixture("web_server_cfg_cache_bad.toml", "[cache]\nttl = -1\n")};
+  REQUIRE_THROWS_AS(config::load(file.path), std::runtime_error);
 }
 
 TEST_CASE("config: rejects an out-of-range port", "[config]") {
@@ -107,6 +145,9 @@ TEST_CASE("config: write_example produces a loadable config", "[config]") {
 
   const config::Config cfg = config::load(file.path);
   REQUIRE(cfg.port == 8080);
+  REQUIRE(cfg.cache_ttl_seconds == 60);
+  REQUIRE(cfg.cache_max_bytes == 1024ull * 1024 * 1024);
+  REQUIRE(cfg.cache_max_file_bytes == 64ull * 1024 * 1024);
   REQUIRE(cfg.log_path == "web-server.log");
   REQUIRE(config::find_route(cfg.routes, "/merhaba")->target == "./public/merhaba.html");
 }

@@ -1,10 +1,17 @@
 #include "config.hpp"
 
+#include "util/string.hpp"
+
 #include <toml.hpp>
 
+#include <cctype>
+#include <charconv>
+#include <cstdint>
 #include <fstream>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 namespace web_server {
@@ -24,10 +31,75 @@ port = 8080
 "/merhaba" = "./public/merhaba.html"
 "/assets" = "./public/assets"
 
+[cache]
+# Time-to-live for cached files, in seconds (0 disables caching).
+ttl = 60
+# Maximum total memory the cache may use (accepts B/K/M/G suffixes).
+max_size = "1G"
+# Files larger than this are served directly, without caching.
+max_file_size = "64M"
+
 [logging]
 # Path of the log file. Use "-" to log to the console instead.
 path = "web-server.log"
 )";
+
+std::size_t parse_size(std::string_view text) {
+  const std::string_view trimmed = util::trim(text);
+  if (trimmed.empty()) {
+    throw std::runtime_error("expected a size value, got an empty string");
+  }
+
+  std::size_t digits = 0;
+  while (digits < trimmed.size() &&
+         std::isdigit(static_cast<unsigned char>(trimmed[digits])) != 0) {
+    ++digits;
+  }
+  if (digits == 0) {
+    throw std::runtime_error("invalid size value: " + std::string{trimmed});
+  }
+
+  std::uint64_t number = 0;
+  const auto [ptr, ec] = std::from_chars(trimmed.data(), trimmed.data() + digits, number);
+  if (ec != std::errc{}) {
+    throw std::runtime_error("invalid size value: " + std::string{trimmed});
+  }
+
+  const std::string_view suffix = util::trim(trimmed.substr(digits));
+  std::uint64_t multiplier = 1;
+  if (suffix.empty() || suffix == "B" || suffix == "b") {
+    multiplier = 1;
+  } else if (suffix == "K" || suffix == "KB" || suffix == "k" || suffix == "kb") {
+    multiplier = 1024ull;
+  } else if (suffix == "M" || suffix == "MB" || suffix == "m" || suffix == "mb") {
+    multiplier = 1024ull * 1024;
+  } else if (suffix == "G" || suffix == "GB" || suffix == "g" || suffix == "gb") {
+    multiplier = 1024ull * 1024 * 1024;
+  } else if (suffix == "T" || suffix == "TB" || suffix == "t" || suffix == "tb") {
+    multiplier = 1024ull * 1024 * 1024 * 1024;
+  } else {
+    throw std::runtime_error("unknown size suffix: " + std::string{suffix});
+  }
+
+  return static_cast<std::size_t>(number * multiplier);
+}
+
+std::size_t read_size(const toml::table& table, std::string_view key, std::size_t fallback) {
+  const toml::node* value = table.get(key);
+  if (value == nullptr) {
+    return fallback;
+  }
+  if (const auto* as_string = value->as_string()) {
+    return parse_size(as_string->get());
+  }
+  if (const auto* as_integer = value->as_integer()) {
+    if (as_integer->get() < 0) {
+      throw std::runtime_error("cache." + std::string{key} + " must not be negative");
+    }
+    return static_cast<std::size_t>(as_integer->get());
+  }
+  throw std::runtime_error("cache." + std::string{key} + " must be a number or size string");
+}
 
 }  // namespace
 
@@ -57,6 +129,17 @@ Config load(const std::filesystem::path& path) {
       route.target = value.value_or(std::string{});
       config.routes.push_back(std::move(route));
     }
+  }
+
+  if (const auto* cache = tbl["cache"].as_table()) {
+    const std::int64_t ttl =
+      (*cache)["ttl"].value_or(static_cast<std::int64_t>(config.cache_ttl_seconds));
+    if (ttl < 0) {
+      throw std::runtime_error("cache.ttl must not be negative");
+    }
+    config.cache_ttl_seconds = static_cast<std::uint32_t>(ttl);
+    config.cache_max_bytes = read_size(*cache, "max_size", config.cache_max_bytes);
+    config.cache_max_file_bytes = read_size(*cache, "max_file_size", config.cache_max_file_bytes);
   }
 
   if (const auto* logging = tbl["logging"].as_table()) {

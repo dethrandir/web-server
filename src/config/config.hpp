@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -21,6 +22,12 @@ struct Config {
   std::uint16_t port = 8080;
   std::string log_path;
   std::vector<Route> routes;
+  // How long a cached response stays valid, in seconds. 0 disables caching.
+  std::uint32_t cache_ttl_seconds = 0;
+  // Maximum total memory the cache may use, in bytes.
+  std::size_t cache_max_bytes = 1024ull * 1024 * 1024;
+  // Files larger than this are served directly, without entering the cache.
+  std::size_t cache_max_file_bytes = 64ull * 1024 * 1024;
 };
 
 Config load(const std::filesystem::path& path);
